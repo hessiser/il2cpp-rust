@@ -38,6 +38,7 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
     eprintln!("[il2cpp_method] Processing function: {}", function_name);
 
     let function_signature = &function_def.sig;
+    let function_vis = &function_def.vis;
     let function_return_type = &function_def.sig.output;
 
     let il2cpp_method_name = &macro_args.name;
@@ -99,10 +100,18 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let class_retrieval = if is_static_method {
         quote! {
-            let class = Self::get_class_static().expect("Failed to get IL2CPP class for static method");
+            let class = match Self::get_class_static() {
+                Ok(class) => class,
+                Err(e) => {
+                    return Err(e);
+                }
+            };
         }
     } else {
         quote! {
+            if self.0.is_null() {
+                return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
+            }
             let class = self.get_class();
         }
     };
@@ -116,7 +125,7 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
     function_signature.output = syn::parse_quote!(-> Result<#il2cpp_return_type, Il2CppError>);
 
     let expanded = quote! {
-        #function_signature {
+        #function_vis #function_signature {
             #class_retrieval
 
             static IL2CPP_METHOD_CACHE: std::sync::OnceLock<
@@ -124,19 +133,20 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
             > = std::sync::OnceLock::new();
 
             let cached_method = match IL2CPP_METHOD_CACHE.get_or_init(|| {
-                #[cfg(feature = "log")]
-                log::debug!(
-                    "[il2cpp_method] Resolving IL2CPP method '{}' with {} arguments",
+                ::il2cpp_runtime::__log_debug(format_args!(
+                    "[il2cpp_method] Resolving {}::{} (args: {}, static: {})",
+                    class.name(),
                     stringify!(#il2cpp_method_name),
-                    #il2cpp_method_arg_count
-                );
+                    stringify!(#(#il2cpp_method_args),*),
+                    #is_static_method
+                ));
 
-                let method_info = class
+                let method_info = match class
                     .find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*])
-                    .expect("Failed to find IL2CPP method");
-
-                #[cfg(feature = "log")]
-                log::debug!("[il2cpp_method] Successfully resolved method at address: {:p}", method_info.va());
+                {
+                    Ok(method_info) => method_info,
+                    Err(e) => return Err(e),
+                };
 
                 Ok(unsafe { std::mem::transmute(method_info.va()) })
             }) {
@@ -213,6 +223,9 @@ pub fn il2cpp_ffi_ref_type(attr: TokenStream, item: TokenStream) -> TokenStream 
             fn ffi_name() -> &'static str {
                 #arg
             }
+            fn as_ptr(&self) -> *const std::ffi::c_void {
+                self.0
+            }
         }
     };
 
@@ -260,11 +273,17 @@ pub fn il2cpp_ffi_value_type(attr: TokenStream, item: TokenStream) -> TokenStrea
             fn ffi_name() -> &'static str {
                 #arg
             }
+            fn as_ptr(&self) -> *const std::ffi::c_void {
+                self as *const _ as *const std::ffi::c_void
+            }
         }
 
         impl Il2CppObject for #boxed_ident {
             fn ffi_name() -> &'static str {
                 #arg
+            }
+            fn as_ptr(&self) -> *const std::ffi::c_void {
+                self.0
             }
         }
     };
@@ -388,12 +407,17 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
         // Instance field getter
         quote! {
             pub fn #rust_field_name(&self) -> Result<#field_return_type, Il2CppError> {
-                let class = crate::types::System_RuntimeType::from_class(self.get_class())?;
+                if self.0.is_null() {
+                    return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
+                }
+                let class = ::il2cpp_runtime::System_RuntimeType::from_class(self.get_class())?;
                 let field_info = class.get_field(#il2cpp_field_name)?;
 
-                #[cfg(feature = "log")]
-                log::debug!("[il2cpp_field] Resolving instance field '{}'", #il2cpp_field_name);
-
+                ::il2cpp_runtime::__log_debug(format_args!(
+                    "[il2cpp_field] Resolving {}::{}",
+                    class.get_il2cpp_type().name(),
+                    #il2cpp_field_name
+                ));
                 let value = field_info.get_value(self.0)?;
                 Ok(unsafe { std::mem::transmute(value) })
             }
@@ -402,12 +426,14 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
         // Static field getter
         quote! {
             pub fn #rust_field_name() -> Result<#field_return_type, Il2CppError> {
-                let class = crate::types::System_RuntimeType::from_class(Self::get_class_static()?)?;
+                let class = ::il2cpp_runtime::System_RuntimeType::from_class(Self::get_class_static()?)?;
                 let field_info = class.get_field(#il2cpp_field_name)?;
 
-                #[cfg(feature = "log")]
-                log::debug!("[il2cpp_field] Resolving static field '{}'", #il2cpp_field_name);
-
+                ::il2cpp_runtime::__log_debug(format_args!(
+                    "[il2cpp_field] Resolving {}::{}",
+                    class.get_il2cpp_type().name(),
+                    #il2cpp_field_name
+                ));
                 let value = field_info.get_value(core::ptr::null())?;
                 Ok(unsafe { std::mem::transmute(value) })
             }

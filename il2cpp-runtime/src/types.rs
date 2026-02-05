@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::ffi::CString;
 use std::fmt::Display;
 use std::os::raw::c_void;
 use std::ptr::null;
@@ -191,17 +192,23 @@ impl Il2CppClass {
         name: &str,
         arg_types: Vec<&str>,
     ) -> Result<Il2CppMethod, Il2CppError> {
+        if self.0.is_null() {
+            crate::__log_debug(format_args!(
+                "[il2cpp_runtime] find_method called with null Il2CppClass for '{}'",
+                name
+            ));
+            return Err(Il2CppError::NullPointerDereference);
+        }
+
         let qualified_name = format!("{}::{}", self.name(), name);
+        let mut saw_name_match = false;
 
         for method in self.methods().iter().filter(|m| m.name() == name) {
+            saw_name_match = true;
             let count = method.args_cnt() as usize;
 
             if count != arg_types.len() {
-                return Err(Il2CppError::ArgCountMismatch {
-                    method: qualified_name.clone(),
-                    actual: count,
-                    expected: arg_types.len(),
-                });
+                continue;
             }
 
             let mut mismatch: Option<(usize, String)> = None;
@@ -213,20 +220,47 @@ impl Il2CppClass {
             }
 
             if let Some((i, actual)) = mismatch {
-                return Err(Il2CppError::ArgTypeMismatch {
-                    method: qualified_name.clone(),
-                    index: i,
-                    expected: arg_types[i].to_string(),
-                    actual,
-                });
+                continue;
             }
 
             return Ok(*method);
         }
 
-        Err(Il2CppError::MethodNotFound(qualified_name))
+        if saw_name_match {
+            Err(Il2CppError::NoOverloadMatched(qualified_name))
+        } else {
+            Err(Il2CppError::MethodNotFound(qualified_name))
+        }
     }
 }
+
+#[il2cpp_ffi_ref_type("System.Runtime.InteropServices.Marshal")]
+pub struct System_RuntimeInteropServices_Marshal;
+
+impl System_RuntimeInteropServices_Marshal {
+    #[il2cpp_method(name = "PtrToStringAnsi", args = ["System.IntPtr"])]
+    pub fn ptr_to_string_ansi(ptr: *const u8) -> Il2CppString {}
+
+    pub fn create_string(&self) -> String {
+        unsafe {
+            let str_length = *(self.0.wrapping_add(16) as *const u32);
+            let str_ptr = self.0.wrapping_add(20) as *const u16;
+            let slice = std::slice::from_raw_parts(str_ptr, str_length as usize);
+            String::from_utf16(slice).unwrap()
+        }
+    }
+
+    pub fn create_str(&self) -> Cow<'static, str> {
+        self.create_string().into()
+    }
+
+    fn create_il2cpp_string<S: AsRef<str>>(s: S) -> Il2CppString {
+        let cs = CString::new(s.as_ref()).unwrap();
+        Self::ptr_to_string_ansi(cs.as_c_str().to_bytes_with_nul().as_ptr())
+            .expect("failed to allocate il2cpp string")
+    }
+}
+
 
 #[il2cpp_ffi_ref_type("System.String")]
 pub struct Il2CppString;
@@ -242,14 +276,14 @@ impl Il2CppString {
         unsafe { *(self.0.byte_offset(32) as *const u16) }
     }
 
-    #[il2cpp_method(name = "CreateString", args = ["char*"])]
-    fn create_string(&self, buffer: *const u16) -> Il2CppString {}
+    // #[il2cpp_method(name = "CreateString", args = ["char*"])]
+    // fn create_string(&self, buffer: *const u16) -> Il2CppString {}
 
-    pub fn new<S: AsRef<str>>(input: S) -> Result<Il2CppString, Il2CppError> {
-        let res = Il2CppString(null());
-        let ffi_str = widestring::U16CString::from_str(input).unwrap();
-        res.create_string(ffi_str.as_ptr())
-    }
+    // pub fn new<S: AsRef<str>>(input: S) -> Result<Il2CppString, Il2CppError> {
+    //     let res = Il2CppString(null());
+    //     let ffi_str = widestring::U16CString::from_str(input).unwrap();
+    //     res.create_string(ffi_str.as_ptr())
+    // }
 }
 
 impl Display for Il2CppString {
@@ -265,10 +299,13 @@ impl Display for Il2CppString {
     }
 }
 
-#[ffi_type]
+#[il2cpp_ffi_ref_type("System.Array")]
 pub struct Il2CppArray;
 
 impl Il2CppArray {
+    #[il2cpp_method(name = "CreateInstance", args = ["System.Type", "int"])]
+    pub fn create_instance(ty: System_Type, length: i32) -> Il2CppArray {}
+
     pub fn monitor(&self) -> *const c_void {
         unsafe { *((self.0.byte_offset(8)) as *const *const c_void) }
     }
@@ -341,7 +378,7 @@ impl System_RuntimeType {
     fn _get_field(&self, name: Il2CppString, binding_flags: i32) -> System_Reflection_FieldInfo {}
 
     // pub fn get_field<S: AsRef<str>>(&self, name: S) -> Result<Il2CppField, Il2CppError> {
-    //     let ffi_name = Il2CppString::new(&name)?;
+    //     let ffi_name = System_RuntimeInteropServices_Marshal::create_il2cpp_string(&name);
     //     match self._get_field(ffi_name, 60) {
     //         Ok(field) => {
     //             if field.0 != std::ptr::null() {
@@ -370,7 +407,7 @@ impl System_RuntimeType {
     // }
 
     pub fn get_field<S: AsRef<str>>(&self, name: S) -> Result<Il2CppField, Il2CppError> {
-        let ffi_name = Il2CppString::new(&name)?;
+        let ffi_name = System_RuntimeInteropServices_Marshal::create_il2cpp_string(&name);
 
         let try_get = |rt: &System_RuntimeType| -> Result<Option<Il2CppField>, Il2CppError> {
             match rt._get_field(ffi_name, 60) {
@@ -412,8 +449,9 @@ impl System_RuntimeType {
 
 pub trait Il2CppObject {
     fn ffi_name() -> &'static str;
+    fn as_ptr(&self) -> *const std::ffi::c_void;
     fn get_class(&self) -> Il2CppClass {
-        Il2CppClass(&self as *const _ as *const std::ffi::c_void)
+        unsafe { *((self.as_ptr()) as *const Il2CppClass) }
     }
     fn get_class_static() -> Result<Il2CppClass, crate::errors::Il2CppError> {
         crate::get_cached_class(Self::ffi_name())

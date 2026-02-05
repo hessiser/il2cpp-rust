@@ -3,9 +3,25 @@ pub mod errors;
 pub mod types;
 mod utils;
 
+extern crate self as il2cpp_runtime;
+
+pub use il2cpp_macros::{ffi_type, il2cpp_ffi_ref_type, il2cpp_ffi_value_type, il2cpp_getter_property, il2cpp_method, il2cpp_field};
+pub use types::{Il2CppObject, Il2CppClass, Il2CppMethod, Il2CppType, Il2CppField, Il2CppDomain, System_RuntimeType};
+
+pub mod prelude {
+    pub use crate::types::*;
+    pub use crate::{ffi_type, il2cpp_ffi_ref_type, il2cpp_ffi_value_type, il2cpp_getter_property, il2cpp_method, il2cpp_field};
+    pub use crate::errors::Il2CppError;
+}
+
+pub fn __log_debug(args: std::fmt::Arguments<'_>) {
+    #[cfg(feature = "log")]
+    log::debug!("{}", args);
+}
+
+
 use crate::{
     errors::Il2CppError,
-    types::{Il2CppClass, Il2CppMethod},
 };
 use std::{borrow::Cow, collections::HashMap, sync::OnceLock};
 
