@@ -6,8 +6,43 @@ use crate::types::{Il2CppAssembly, Il2CppClass, Il2CppDomain, Il2CppField, Il2Cp
 
 pub static API_INDEXES: OnceLock<HashMap<&'static str, usize>> = OnceLock::new();
 
+pub const API_FUNCTION_ORDER: [&str; 16] = [
+    "il2cpp_assembly_get_image",
+    "il2cpp_class_get_methods",
+    "il2cpp_class_get_name",
+    "il2cpp_class_from_type",
+    "il2cpp_domain_get",
+    "il2cpp_domain_get_assemblies",
+    "il2cpp_field_get_name",
+    "il2cpp_field_get_value_object",
+    "il2cpp_method_get_return_type",
+    "il2cpp_method_get_name",
+    "il2cpp_method_get_param_count",
+    "il2cpp_method_get_param",
+    "il2cpp_thread_attach",
+    "il2cpp_type_get_name",
+    "il2cpp_image_get_class_count",
+    "il2cpp_image_get_class",
+];
+
 pub fn set_api_indexes(indexes: HashMap<&'static str, usize>) {
     let _ = API_INDEXES.set(indexes);
+}
+
+pub fn set_api_indexes_ordered(indexes: &[usize]) {
+    assert_eq!(
+        indexes.len(),
+        API_FUNCTION_ORDER.len(),
+        "API index count mismatch"
+    );
+
+    let map = API_FUNCTION_ORDER
+        .iter()
+        .copied()
+        .zip(indexes.iter().copied())
+        .collect::<HashMap<_, _>>();
+
+    let _ = API_INDEXES.set(map);
 }
 
 macro_rules! il2cpp_api {

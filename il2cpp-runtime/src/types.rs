@@ -3,14 +3,15 @@ use std::fmt::Display;
 use std::os::raw::c_void;
 use std::ptr::null;
 
-use il2cpp_macros::{ffi_type, il2cpp_ffi_ref_type, il2cpp_ffi_value_type, il2cpp_getter_property, il2cpp_method};
+use il2cpp_macros::{
+    ffi_type, il2cpp_ffi_ref_type, il2cpp_ffi_value_type, il2cpp_getter_property, il2cpp_method,
+};
 
 use crate::api::{
     il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name,
     il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object,
     il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name,
-    il2cpp_method_get_param, il2cpp_method_get_param_count,
-    il2cpp_type_get_name,
+    il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_type_get_name,
 };
 use crate::errors::Il2CppError;
 use crate::{get_cached_class, utils};
@@ -48,8 +49,8 @@ impl Il2CppMethod {
         unsafe { *((self.0) as *const Il2CppClass) }
     }
 
-    pub fn va(&self) -> usize {
-        unsafe { *((self.0.byte_offset(8)) as *const usize) }
+    pub fn va(&self) -> *const c_void {
+        unsafe { *((self.0.byte_offset(8)) as *const *const c_void) }
     }
 
     pub fn args_cnt(&self) -> u32 {
@@ -264,6 +265,62 @@ impl Display for Il2CppString {
     }
 }
 
+#[ffi_type]
+pub struct Il2CppArray;
+
+impl Il2CppArray {
+    pub fn monitor(&self) -> *const c_void {
+        unsafe { *((self.0.byte_offset(8)) as *const *const c_void) }
+    }
+    pub fn bounds(&self) -> *const c_void {
+        unsafe { *((self.0.byte_offset(16)) as *const *const c_void) }
+    }
+    pub fn len(&self) -> usize {
+        unsafe { *((self.0.byte_offset(24)) as *const usize) }
+    }
+    fn first_item_ptr(&self) -> *const c_void {
+        unsafe { self.0.byte_offset(32) }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    pub fn get<T>(&self, i: usize) -> &T {
+        let size = std::mem::size_of::<T>();
+        unsafe { &*((self.first_item_ptr().add(i * size)) as *const T) }
+    }
+    pub fn get_mut<T>(&mut self, i: usize) -> &mut T {
+        let size = std::mem::size_of::<T>();
+        unsafe { &mut *((self.first_item_ptr().add(i * size)) as *mut T) }
+    }
+    pub fn to_vec<T: Clone>(self) -> Vec<T> {
+        unsafe {
+            std::slice::from_raw_parts(self.first_item_ptr() as *const T, self.len()).to_vec()
+        }
+    }
+}
+
+#[ffi_type]
+pub struct List;
+
+impl List {
+    pub fn monitor(&self) -> *const c_void {
+        unsafe { *((self.0.byte_offset(8)) as *const *const c_void) }
+    }
+    pub fn items(&self) -> Il2CppArray {
+        unsafe { Il2CppArray(*((self.0.byte_offset(16)) as *const *const c_void)) }
+    }
+    pub fn size(&self) -> i32 {
+        unsafe { *((self.0.byte_offset(24)) as *const i32) }
+    }
+    pub fn to_vec<T: Clone>(self) -> Vec<T> {
+        unsafe {
+            let items = self.items();
+            std::slice::from_raw_parts(items.first_item_ptr() as *const T, self.size() as usize)
+                .to_vec()
+        }
+    }
+}
+
 #[il2cpp_ffi_ref_type("System.Type")]
 struct System_Type;
 
@@ -273,7 +330,7 @@ impl System_Type {
 }
 
 #[il2cpp_ffi_ref_type("System.RuntimeType")]
-pub struct System_RuntimeType(pub usize);
+pub struct System_RuntimeType;
 
 impl System_RuntimeType {
     // cs_property!(pub base_type, "get_BaseType", RuntimeType, self);
@@ -339,7 +396,9 @@ impl System_RuntimeType {
     }
 
     pub fn from_class(class: Il2CppClass) -> Result<Self, Il2CppError> {
-        Ok(Self(System_Type::get_type_from_handle(class.byval_arg())?.0))
+        Ok(Self(
+            System_Type::get_type_from_handle(class.byval_arg())?.0,
+        ))
     }
 
     pub fn from_name(name: &str) -> Result<Self, Il2CppError> {
