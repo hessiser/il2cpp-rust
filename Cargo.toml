@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = ["il2cpp-macros","il2cpp-runtime"]
