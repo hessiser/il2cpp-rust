@@ -5,13 +5,22 @@ mod utils;
 
 extern crate self as il2cpp_runtime;
 
-pub use il2cpp_macros::{ffi_type, il2cpp_ref_type, il2cpp_value_type, il2cpp_getter_property, il2cpp_method, il2cpp_field};
-pub use types::{Il2CppObject, Il2CppRefType, Il2CppClass, Il2CppMethod, Il2CppType, Il2CppField, Il2CppDomain, System_RuntimeType};
+pub use il2cpp_macros::{
+    ffi_type, il2cpp_enum_type, il2cpp_field, il2cpp_getter_property, il2cpp_method,
+    il2cpp_ref_type, il2cpp_value_type,
+};
+pub use types::{
+    Il2CppClass, Il2CppDomain, Il2CppField, Il2CppMethod, Il2CppObject, Il2CppPtr, Il2CppRefType,
+    Il2CppType, System_RuntimeType,
+};
 
 pub mod prelude {
-    pub use crate::types::*;
-    pub use crate::{ffi_type, il2cpp_ref_type, il2cpp_value_type, il2cpp_getter_property, il2cpp_method, il2cpp_field};
     pub use crate::errors::Il2CppError;
+    pub use crate::types::*;
+    pub use crate::{
+        ffi_type, il2cpp_enum_type, il2cpp_field, il2cpp_getter_property, il2cpp_method,
+        il2cpp_ref_type, il2cpp_value_type,
+    };
 }
 
 pub fn __log_debug(args: std::fmt::Arguments<'_>) {
@@ -19,10 +28,7 @@ pub fn __log_debug(args: std::fmt::Arguments<'_>) {
     log::debug!("{}", args);
 }
 
-
-use crate::{
-    errors::Il2CppError,
-};
+use crate::errors::Il2CppError;
 use std::{borrow::Cow, collections::HashMap, sync::OnceLock};
 
 static API_TABLE_OFFSET: OnceLock<usize> = OnceLock::new();
@@ -38,9 +44,7 @@ pub fn get_cached_class(key: &str) -> Result<Il2CppClass, Il2CppError> {
         .cloned()
 }
 
-
 pub fn init(api_table_offset: usize, indexes: api::ApiIndexTable) -> Result<(), Il2CppError> {
-
     let _ = API_TABLE_OFFSET.set(api_table_offset);
     api::set_api_indexes(indexes);
     let mut type_table = HashMap::with_capacity(50_000);
@@ -49,11 +53,9 @@ pub fn init(api_table_offset: usize, indexes: api::ApiIndexTable) -> Result<(), 
     api::il2cpp_thread_attach(domain);
 
     for assembly in domain.assemblies() {
-
         let image = api::il2cpp_assembly_get_image(assembly);
 
         for class in image.classes() {
-
             let type_name = class.byval_arg().name();
             type_table.insert(type_name, class);
         }

@@ -1,9 +1,12 @@
-use std::boxed;
-
 use darling::FromMeta;
+
 use proc_macro::TokenStream;
 use quote::quote;
-use syn::{Expr, FnArg, Ident, ItemEnum, ItemFn, ItemStruct, LitStr, Pat, parse_macro_input};
+use syn::{
+    parse::{Parse, ParseStream},
+    token::Paren,
+    Expr, FnArg, Ident, ItemEnum, ItemFn, ItemStruct, LitStr, Pat, Token, parse_macro_input,
+};
 
 #[derive(Debug, FromMeta)]
 #[darling(derive_syn_parse)]
@@ -205,18 +208,157 @@ fn impl_il2cpp_ref_type(
     }
 }
 
+struct Il2CppTypeArgs {
+    name: LitStr,
+    base: Option<syn::Type>,
+}
+
+enum Il2CppTypeArgItem {
+    Name(LitStr),
+    Base(syn::Type),
+}
+
+struct Il2CppTypeArgList {
+    items: Vec<Il2CppTypeArgItem>,
+}
+
+impl Parse for Il2CppTypeArgList {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut items = Vec::new();
+
+        while !input.is_empty() {
+            if input.peek(LitStr) {
+                let lit: LitStr = input.parse()?;
+                items.push(Il2CppTypeArgItem::Name(lit));
+            } else if input.peek(Ident) && input.peek2(Token![=]) {
+                let ident: Ident = input.parse()?;
+                let _eq: Token![=] = input.parse()?;
+                if ident == "name" {
+                    let lit: LitStr = input.parse()?;
+                    items.push(Il2CppTypeArgItem::Name(lit));
+                } else {
+                    return Err(syn::Error::new_spanned(
+                        ident,
+                        "Unsupported argument; use name = \"Type\"",
+                    ));
+                }
+            } else if input.peek(Ident) && input.peek2(Paren) {
+                let ident: Ident = input.parse()?;
+                if ident == "base" {
+                    let content;
+                    syn::parenthesized!(content in input);
+                    let ty: syn::Type = content.parse()?;
+                    items.push(Il2CppTypeArgItem::Base(ty));
+                } else {
+                    return Err(syn::Error::new_spanned(
+                        ident,
+                        "Unsupported argument; use base(Type)",
+                    ));
+                }
+            } else {
+                return Err(input.error("Unsupported argument; use a name string or base(Type)"));
+            }
+
+            if input.peek(Token![,]) {
+                let _comma: Token![,] = input.parse()?;
+            }
+        }
+
+        Ok(Self { items })
+    }
+}
+
+fn parse_il2cpp_type_args(attr: TokenStream) -> Result<Il2CppTypeArgs, TokenStream> {
+    if let Ok(name_only) = syn::parse::<LitStr>(attr.clone()) {
+        return Ok(Il2CppTypeArgs {
+            name: name_only,
+            base: None,
+        });
+    }
+
+    let mut name: Option<LitStr> = None;
+    let mut base: Option<syn::Type> = None;
+
+    let args = match syn::parse::<Il2CppTypeArgList>(attr) {
+        Ok(args) => args,
+        Err(err) => return Err(err.to_compile_error().into()),
+    };
+
+    for arg in args.items {
+        match arg {
+            Il2CppTypeArgItem::Name(lit) => {
+                if name.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        lit,
+                        "Multiple name arguments provided",
+                    )
+                    .to_compile_error()
+                    .into());
+                }
+                name = Some(lit);
+            }
+            Il2CppTypeArgItem::Base(ty) => {
+                if base.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        ty,
+                        "Multiple base arguments provided",
+                    )
+                    .to_compile_error()
+                    .into());
+                }
+                base = Some(ty);
+            }
+        }
+    }
+
+    let name = match name {
+        Some(name) => name,
+        None => {
+            return Err(syn::Error::new(
+                proc_macro2::Span::call_site(),
+                "Missing required name string",
+            )
+            .to_compile_error()
+            .into());
+        }
+    };
+
+    Ok(Il2CppTypeArgs { name, base })
+}
+
 /// Generates a reference type wrapper for an IL2CPP class (managed reference type).
 #[proc_macro_attribute]
 pub fn il2cpp_ref_type(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let arg = parse_macro_input!(attr as syn::LitStr);
+    let args = match parse_il2cpp_type_args(attr) {
+        Ok(args) => args,
+        Err(err) => return err,
+    };
 
     let ItemStruct { ident, .. } = parse_macro_input!(item as ItemStruct);
 
     let ffi_type_expanded = generate_ffi_type_struct(&ident);
-    let ref_impls = impl_il2cpp_ref_type(&ident, &arg, quote! { self.0 });
+    let ref_impls = impl_il2cpp_ref_type(&ident, &args.name, quote! { self.0 });
+    let base_helpers = if let Some(base_ty) = args.base {
+        quote! {
+            impl #ident {
+                pub fn as_base(&self) -> #base_ty {
+                    #base_ty(self.0)
+                }
+            }
+
+            impl From<&#ident> for #base_ty {
+                fn from(value: &#ident) -> Self {
+                    #base_ty(value.0)
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
     let expanded = quote! {
         #ffi_type_expanded
         #ref_impls
+        #base_helpers
     };
 
     TokenStream::from(expanded)
@@ -226,17 +368,37 @@ pub fn il2cpp_ref_type(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// The original struct is emitted as `#[repr(C)]` and `Copy`.
 #[proc_macro_attribute]
 pub fn il2cpp_value_type(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let arg = parse_macro_input!(attr as LitStr);
+    let args = match parse_il2cpp_type_args(attr) {
+        Ok(args) => args,
+        Err(err) => return err,
+    };
     let input = parse_macro_input!(item as ItemStruct);
     let ident = &input.ident;
     let boxed_ident = Ident::new(&format!("{}__Boxed", ident), ident.span());
 
     let value_object_impl = impl_il2cpp_object(
         ident,
-        &arg,
+        &args.name,
         quote! { self as *const _ as *const std::ffi::c_void },
     );
-    let boxed_ref_impls = impl_il2cpp_ref_type(&boxed_ident, &arg, quote! { self.0 });
+    let boxed_ref_impls = impl_il2cpp_ref_type(&boxed_ident, &args.name, quote! { self.0 });
+    let base_helpers = if let Some(base_ty) = args.base {
+        quote! {
+            impl #boxed_ident {
+                pub fn as_base(&self) -> #base_ty {
+                    #base_ty(self.0)
+                }
+            }
+
+            impl From<&#boxed_ident> for #base_ty {
+                fn from(value: &#boxed_ident) -> Self {
+                    #base_ty(value.0)
+                }
+            }
+        }
+    } else {
+        quote! {}
+    };
 
     let expanded = quote! {
         #[repr(C)]
@@ -250,7 +412,26 @@ pub fn il2cpp_value_type(attr: TokenStream, item: TokenStream) -> TokenStream {
         unsafe impl Send for #boxed_ident {}
         unsafe impl Sync for #boxed_ident {}
 
+        impl std::ops::Deref for #boxed_ident {
+            type Target = #ident;
+
+            fn deref(&self) -> &Self::Target {
+                if self.0.is_null() {
+                    panic!("Dereferenced null IL2CPP boxed value");
+                }
+                unsafe { &*(self.0 as *const #ident).byte_offset(0x10) }
+            }
+        }
+
         impl #boxed_ident {
+            pub fn try_deref(&self) -> Result<&#ident, Il2CppError> {
+                if self.0.is_null() {
+                    Err(Il2CppError::NullPointerDereference)
+                } else {
+                    Ok(unsafe { &*(self.0 as *const #ident).byte_offset(0x10) })
+                }
+            }
+
             pub unsafe fn unbox(&self) -> Result<#ident, Il2CppError> {
                 if self.0.is_null() {
                     Err(Il2CppError::NullPointerDereference)
@@ -264,6 +445,7 @@ pub fn il2cpp_value_type(attr: TokenStream, item: TokenStream) -> TokenStream {
         impl Il2CppValueType for #ident {}
 
         #boxed_ref_impls
+        #base_helpers
     };
 
     TokenStream::from(expanded)
@@ -427,23 +609,80 @@ pub fn il2cpp_getter_property(args: TokenStream, input: TokenStream) -> TokenStr
     TokenStream::from(expanded)
 }
 
-/// Generates a repr'd enum with sequential discriminants starting at 0.
+/// Generates a repr'd enum with standard derives,
+/// plus a `__Boxed` ref wrapper for IL2CPP value semantics.
 #[proc_macro_attribute]
 pub fn il2cpp_enum_type(attr: TokenStream, item: TokenStream) -> TokenStream {
-    let repr_type: syn::Type = match syn::parse(attr) {
-        Ok(parsed) => parsed,
-        Err(parse_error) => return parse_error.to_compile_error().into(),
-    };
+    let repr_type = parse_macro_input!(attr as syn::Type);
 
     let mut enum_def = parse_macro_input!(item as ItemEnum);
+    let ident = enum_def.ident.clone();
+    let boxed_ident = Ident::new(&format!("{}__Boxed", ident), ident.span());
+    let name_lit = LitStr::new(&ident.to_string(), ident.span());
+
     enum_def
         .attrs
         .push(syn::parse_quote!(#[repr(#repr_type)]));
+    enum_def
+        .attrs
+        .push(syn::parse_quote!(#[derive(Debug, Copy, Clone, Eq, PartialEq)]));
 
-    for (index, variant) in enum_def.variants.iter_mut().enumerate() {
-        let value: Expr = syn::parse_quote!(#index);
-        variant.discriminant = Some((Default::default(), value));
-    }
+    let enum_object_impl = impl_il2cpp_object(
+        &ident,
+        &name_lit,
+        quote! { self as *const _ as *const std::ffi::c_void },
+    );
+    let boxed_ref_impls = impl_il2cpp_ref_type(&boxed_ident, &name_lit, quote! { self.0 });
 
-    TokenStream::from(quote! { #enum_def })
+    let boxed_struct = quote! {
+        #[repr(transparent)]
+        #[derive(Debug, Copy, Clone, Eq, PartialEq)]
+        pub struct #boxed_ident(pub *const std::ffi::c_void);
+
+        unsafe impl Send for #boxed_ident {}
+        unsafe impl Sync for #boxed_ident {}
+
+        impl std::ops::Deref for #boxed_ident {
+            type Target = #ident;
+
+            fn deref(&self) -> &Self::Target {
+                if self.0.is_null() {
+                    panic!("Dereferenced null IL2CPP boxed value");
+                }
+                unsafe { &*(self.0 as *const #ident).byte_offset(0x10) }
+            }
+        }
+
+        impl #boxed_ident {
+            pub fn try_deref(&self) -> Result<&#ident, Il2CppError> {
+                if self.0.is_null() {
+                    Err(Il2CppError::NullPointerDereference)
+                } else {
+                    Ok(unsafe { &*(self.0 as *const #ident).byte_offset(0x10) })
+                }
+            }
+
+            pub unsafe fn unbox(&self) -> Result<#ident, Il2CppError> {
+                if self.0.is_null() {
+                    Err(Il2CppError::NullPointerDereference)
+                } else {
+                    Ok(unsafe { *(self.0 as *const #ident).byte_offset(0x10) })
+                }
+            }
+        }
+    };
+
+    let expanded = quote! {
+        #enum_def
+
+        #boxed_struct
+
+        #enum_object_impl
+
+        impl Il2CppValueType for #ident {}
+
+        #boxed_ref_impls
+    };
+
+    TokenStream::from(expanded)
 }

@@ -237,32 +237,34 @@ impl Il2CppClass {
     }
 }
 
-// #[il2cpp_ref_type("System.Runtime.InteropServices.Marshal")]
-// pub struct System_RuntimeInteropServices_Marshal;
+#[il2cpp_ref_type("System.Runtime.InteropServices.Marshal")]
+pub struct System_RuntimeInteropServices_Marshal;
 
-// impl System_RuntimeInteropServices_Marshal {
-//     #[il2cpp_method(name = "PtrToStringAnsi", args = ["System.IntPtr"])]
-//     pub fn ptr_to_string_ansi(ptr: *const u8) -> Il2CppString {}
+impl System_RuntimeInteropServices_Marshal {
+    #[il2cpp_method(name = "SizeOf", args = ["System.Type"])]
+    pub fn size_of(ty: System_Type) -> System_Int32__Boxed {}
+    // #[il2cpp_method(name = "PtrToStringAnsi", args = ["System.IntPtr"])]
+    // pub fn ptr_to_string_ansi(ptr: *const u8) -> Il2CppString {}
 
-//     pub fn create_string(&self) -> String {
-//         unsafe {
-//             let str_length = *(self.0.wrapping_add(16) as *const u32);
-//             let str_ptr = self.0.wrapping_add(20) as *const u16;
-//             let slice = std::slice::from_raw_parts(str_ptr, str_length as usize);
-//             String::from_utf16(slice).unwrap()
-//         }
-//     }
+    // pub fn create_string(&self) -> String {
+    //     unsafe {
+    //         let str_length = *(self.0.wrapping_add(16) as *const u32);
+    //         let str_ptr = self.0.wrapping_add(20) as *const u16;
+    //         let slice = std::slice::from_raw_parts(str_ptr, str_length as usize);
+    //         String::from_utf16(slice).unwrap()
+    //     }
+    // }
 
-//     pub fn create_str(&self) -> Cow<'static, str> {
-//         self.create_string().into()
-//     }
+    // pub fn create_str(&self) -> Cow<'static, str> {
+    //     self.create_string().into()
+    // }
 
-//     fn create_il2cpp_string<S: AsRef<str>>(s: S) -> Il2CppString {
-//         let cs = CString::new(s.as_ref()).unwrap();
-//         Self::ptr_to_string_ansi(cs.as_c_str().to_bytes_with_nul().as_ptr())
-//             .expect("failed to allocate il2cpp string")
-//     }
-// }
+    // fn create_il2cpp_string<S: AsRef<str>>(s: S) -> Il2CppString {
+    //     let cs = CString::new(s.as_ref()).unwrap();
+    //     Self::ptr_to_string_ansi(cs.as_c_str().to_bytes_with_nul().as_ptr())
+    //         .expect("failed to allocate il2cpp string")
+    // }
+}
 
 
 #[il2cpp_ref_type("System.String")]
@@ -271,13 +273,6 @@ pub struct Il2CppString;
 impl Il2CppString {
     // Do not use il2cpp_field attribute
     // It is reliant on Il2CppString
-    fn len(&self) -> u32 {
-        unsafe { *(self.0.byte_offset(24) as *const u32) }
-    }
-
-    fn first_char(&self) -> u16 {
-        unsafe { *(self.0.byte_offset(32) as *const u16) }
-    }
 
     #[il2cpp_method(name = "CreateString", args = ["char*"], extension = true)]
     fn create_string(buffer: *const u16) -> Il2CppString {}
@@ -291,9 +286,10 @@ impl Il2CppString {
 impl Display for Il2CppString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         unsafe {
-            let ptr = &self.first_char();
-            let array = std::slice::from_raw_parts(ptr, self.len() as usize);
-            match String::from_utf16(&array) {
+            let str_length = *(self.0.wrapping_add(16) as *const u32);
+            let str_ptr = self.0.wrapping_add(20) as *const u16;
+            let slice = std::slice::from_raw_parts(str_ptr, str_length as usize);
+            match String::from_utf16(slice) {
                 Ok(string) => write!(f, "{}", string),
                 Err(e) => write!(f, "{}", e),
             }
@@ -338,7 +334,7 @@ impl Il2CppArray {
     }
 }
 
-#[ffi_type]
+#[il2cpp_ref_type("System.Collections.Generic.List`1")]
 pub struct List;
 
 impl List {
@@ -466,23 +462,295 @@ impl System_Reflection_FieldInfo {
 #[il2cpp_value_type("System.UInt32")]
 pub struct System_UInt32(pub u32);
 
+impl From<System_UInt32> for u32 {
+    fn from(value: System_UInt32) -> Self {
+        value.0
+    }
+}
+
+impl From<&System_UInt32> for u32 {
+    fn from(value: &System_UInt32) -> Self {
+        value.0
+    }
+}
+
+impl From<System_UInt32> for u64 {
+    fn from(value: System_UInt32) -> Self {
+        value.0 as u64
+    }
+}
+
+impl From<&System_UInt32> for u64 {
+    fn from(value: &System_UInt32) -> Self {
+        value.0 as u64
+    }
+}
+
+impl TryFrom<System_UInt32> for isize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: System_UInt32) -> Result<Self, Self::Error> {
+        isize::try_from(value.0)
+    }
+}
+
+impl TryFrom<&System_UInt32> for isize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: &System_UInt32) -> Result<Self, Self::Error> {
+        isize::try_from(value.0)
+    }
+}
+
+impl TryFrom<System_UInt32> for usize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: System_UInt32) -> Result<Self, Self::Error> {
+        usize::try_from(value.0)
+    }
+}
+
+impl TryFrom<&System_UInt32> for usize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: &System_UInt32) -> Result<Self, Self::Error> {
+        usize::try_from(value.0)
+    }
+}
+
 #[il2cpp_value_type("System.Int32")]
 pub struct System_Int32(pub i32);
+
+impl From<System_Int32> for i32 {
+    fn from(value: System_Int32) -> Self {
+        value.0
+    }
+}
+
+impl From<&System_Int32> for i32 {
+    fn from(value: &System_Int32) -> Self {
+        value.0
+    }
+}
+
+impl From<System_Int32> for i64 {
+    fn from(value: System_Int32) -> Self {
+        value.0 as i64
+    }
+}
+
+impl From<&System_Int32> for i64 {
+    fn from(value: &System_Int32) -> Self {
+        value.0 as i64
+    }
+}
+
+impl TryFrom<System_Int32> for isize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: System_Int32) -> Result<Self, Self::Error> {
+        isize::try_from(value.0)
+    }
+}
+
+impl TryFrom<&System_Int32> for isize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: &System_Int32) -> Result<Self, Self::Error> {
+        isize::try_from(value.0)
+    }
+}
+
+impl TryFrom<System_Int32> for usize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: System_Int32) -> Result<Self, Self::Error> {
+        usize::try_from(value.0)
+    }
+}
+
+impl TryFrom<&System_Int32> for usize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: &System_Int32) -> Result<Self, Self::Error> {
+        usize::try_from(value.0)
+    }
+}
 
 #[il2cpp_value_type("System.UInt64")]
 pub struct System_UInt64(pub u64);
 
+impl From<System_UInt64> for u64 {
+    fn from(value: System_UInt64) -> Self {
+        value.0
+    }
+}
+
+impl From<&System_UInt64> for u64 {
+    fn from(value: &System_UInt64) -> Self {
+        value.0
+    }
+}
+
+impl From<System_UInt64> for u128 {
+    fn from(value: System_UInt64) -> Self {
+        value.0 as u128
+    }
+}
+
+impl From<&System_UInt64> for u128 {
+    fn from(value: &System_UInt64) -> Self {
+        value.0 as u128
+    }
+}
+
+impl TryFrom<System_UInt64> for isize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: System_UInt64) -> Result<Self, Self::Error> {
+        isize::try_from(value.0)
+    }
+}
+
+impl TryFrom<&System_UInt64> for isize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: &System_UInt64) -> Result<Self, Self::Error> {
+        isize::try_from(value.0)
+    }
+}
+
+impl TryFrom<System_UInt64> for usize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: System_UInt64) -> Result<Self, Self::Error> {
+        usize::try_from(value.0)
+    }
+}
+
+impl TryFrom<&System_UInt64> for usize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: &System_UInt64) -> Result<Self, Self::Error> {
+        usize::try_from(value.0)
+    }
+}
+
 #[il2cpp_value_type("System.Int64")]
 pub struct System_Int64(pub i64);
+
+impl From<System_Int64> for i64 {
+    fn from(value: System_Int64) -> Self {
+        value.0
+    }
+}
+
+impl From<&System_Int64> for i64 {
+    fn from(value: &System_Int64) -> Self {
+        value.0
+    }
+}
+
+impl From<System_Int64> for i128 {
+    fn from(value: System_Int64) -> Self {
+        value.0 as i128
+    }
+}
+
+impl From<&System_Int64> for i128 {
+    fn from(value: &System_Int64) -> Self {
+        value.0 as i128
+    }
+}
+
+impl TryFrom<System_Int64> for isize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: System_Int64) -> Result<Self, Self::Error> {
+        isize::try_from(value.0)
+    }
+}
+
+impl TryFrom<&System_Int64> for isize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: &System_Int64) -> Result<Self, Self::Error> {
+        isize::try_from(value.0)
+    }
+}
+
+impl TryFrom<System_Int64> for usize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: System_Int64) -> Result<Self, Self::Error> {
+        usize::try_from(value.0)
+    }
+}
+
+impl TryFrom<&System_Int64> for usize {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: &System_Int64) -> Result<Self, Self::Error> {
+        usize::try_from(value.0)
+    }
+}
 
 #[il2cpp_value_type("System.Single")]
 pub struct System_Single(pub f32);
 
+impl From<System_Single> for f32 {
+    fn from(value: System_Single) -> Self {
+        value.0
+    }
+}
+
+impl From<&System_Single> for f32 {
+    fn from(value: &System_Single) -> Self {
+        value.0
+    }
+}
+
+impl From<System_Single> for f64 {
+    fn from(value: System_Single) -> Self {
+        value.0 as f64
+    }
+}
+
+impl From<&System_Single> for f64 {
+    fn from(value: &System_Single) -> Self {
+        value.0 as f64
+    }
+}
+
 #[il2cpp_value_type("System.Double")]
 pub struct System_Double(pub f64);
 
+impl From<System_Double> for f64 {
+    fn from(value: System_Double) -> Self {
+        value.0
+    }
+}
+
+impl From<&System_Double> for f64 {
+    fn from(value: &System_Double) -> Self {
+        value.0
+    }
+}
+
 #[il2cpp_value_type("System.Boolean")]
 pub struct System_Boolean(pub bool);
+
+impl From<System_Boolean> for bool {
+    fn from(value: System_Boolean) -> Self {
+        value.0
+    }
+}
+
+impl From<&System_Boolean> for bool {
+    fn from(value: &System_Boolean) -> Self {
+        value.0
+    }
+}
 
 
 pub trait Il2CppObject {
