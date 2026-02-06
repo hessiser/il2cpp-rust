@@ -5,12 +5,12 @@ mod utils;
 
 extern crate self as il2cpp_runtime;
 
-pub use il2cpp_macros::{ffi_type, il2cpp_ffi_ref_type, il2cpp_ffi_value_type, il2cpp_getter_property, il2cpp_method, il2cpp_field};
-pub use types::{Il2CppObject, Il2CppClass, Il2CppMethod, Il2CppType, Il2CppField, Il2CppDomain, System_RuntimeType};
+pub use il2cpp_macros::{ffi_type, il2cpp_ref_type, il2cpp_value_type, il2cpp_getter_property, il2cpp_method, il2cpp_field};
+pub use types::{Il2CppObject, Il2CppRefType, Il2CppClass, Il2CppMethod, Il2CppType, Il2CppField, Il2CppDomain, System_RuntimeType};
 
 pub mod prelude {
     pub use crate::types::*;
-    pub use crate::{ffi_type, il2cpp_ffi_ref_type, il2cpp_ffi_value_type, il2cpp_getter_property, il2cpp_method, il2cpp_field};
+    pub use crate::{ffi_type, il2cpp_ref_type, il2cpp_value_type, il2cpp_getter_property, il2cpp_method, il2cpp_field};
     pub use crate::errors::Il2CppError;
 }
 
@@ -27,17 +27,7 @@ use std::{borrow::Cow, collections::HashMap, sync::OnceLock};
 
 static API_TABLE_OFFSET: OnceLock<usize> = OnceLock::new();
 
-static FUNCTIONS_TABLE: OnceLock<HashMap<String, Il2CppMethod>> = OnceLock::new();
 static TYPE_TABLE: OnceLock<HashMap<Cow<'static, str>, Il2CppClass>> = OnceLock::new();
-
-pub fn get_native_method(key: &str) -> Result<Il2CppMethod, Il2CppError> {
-    FUNCTIONS_TABLE
-        .get()
-        .ok_or(Il2CppError::FunctionTableError)?
-        .get(key)
-        .ok_or_else(|| Il2CppError::NativeMethodError(key.to_string()))
-        .cloned()
-}
 
 pub fn get_cached_class(key: &str) -> Result<Il2CppClass, Il2CppError> {
     TYPE_TABLE
@@ -49,11 +39,10 @@ pub fn get_cached_class(key: &str) -> Result<Il2CppClass, Il2CppError> {
 }
 
 
-pub fn init(api_table_offset: usize, indexes: &[usize]) -> Result<(), Il2CppError> {
+pub fn init(api_table_offset: usize, indexes: api::ApiIndexTable) -> Result<(), Il2CppError> {
 
     let _ = API_TABLE_OFFSET.set(api_table_offset);
-    api::set_api_indexes_ordered(indexes);
-    let mut method_maps = HashMap::with_capacity(470_000);
+    api::set_api_indexes(indexes);
     let mut type_table = HashMap::with_capacity(50_000);
 
     let domain = api::il2cpp_domain_get();
@@ -66,14 +55,9 @@ pub fn init(api_table_offset: usize, indexes: &[usize]) -> Result<(), Il2CppErro
         for class in image.classes() {
 
             let type_name = class.byval_arg().name();
-            for method in class.methods() {
-                method_maps.insert(format!("{type_name}::{}", method.format_params()), method);
-            }
             type_table.insert(type_name, class);
         }
     }
-
-    FUNCTIONS_TABLE.set(method_maps).unwrap();
     TYPE_TABLE.set(type_table).unwrap();
     Ok(())
 }

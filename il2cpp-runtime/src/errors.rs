@@ -27,10 +27,6 @@ pub enum Il2CppError {
     MethodNameNotMatched(String),
     #[error("No overload of {0} matched signature")]
     NoOverloadMatched(String),
-    #[error("Failed to get function table")]
-    FunctionTableError,
-    #[error("Failed to get native method {0}")]
-    NativeMethodError(String),
     #[error("Failed to get type table")]
     TypeTableError,
     #[error("Failed to get cached class {0}")]

@@ -5,7 +5,7 @@ use std::os::raw::c_void;
 use std::ptr::null;
 
 use il2cpp_macros::{
-    ffi_type, il2cpp_ffi_ref_type, il2cpp_ffi_value_type, il2cpp_getter_property, il2cpp_method,
+    ffi_type, il2cpp_field, il2cpp_getter_property, il2cpp_method, il2cpp_ref_type, il2cpp_value_type
 };
 
 use crate::api::{
@@ -97,28 +97,31 @@ impl Il2CppType {
 
     pub fn alias_name(&self) -> String {
         let name = self.name();
+        let mut alias = name.to_string();
 
-        (match name.as_ref() {
-            "System.Int32" => "int",
-            "System.UInt32" => "uint",
-            "System.Int16" => "short",
-            "System.UInt16" => "ushort",
-            "System.Int64" => "long",
-            "System.UInt64" => "ulong",
-            "System.Byte" => "byte",
-            "System.SByte" => "sbyte",
-            "System.Boolean" => "bool",
-            "System.Single" => "float",
-            "System.Double" => "double",
-            "System.String" => "string",
-            "System.Char" => "char",
-            "System.Object" => "object",
-            "System.Void" => "void",
-            "System.Decimal" => "decimal",
-            "System.DateTime" => "DateTime",
-            other => other,
-        })
-        .to_string()
+        for (from, to) in [
+            ("System.Int32", "int"),
+            ("System.UInt32", "uint"),
+            ("System.Int16", "short"),
+            ("System.UInt16", "ushort"),
+            ("System.Int64", "long"),
+            ("System.UInt64", "ulong"),
+            ("System.Byte", "byte"),
+            ("System.SByte", "sbyte"),
+            ("System.Boolean", "bool"),
+            ("System.Single", "float"),
+            ("System.Double", "double"),
+            ("System.String", "string"),
+            ("System.Char", "char"),
+            ("System.Object", "object"),
+            ("System.Void", "void"),
+            ("System.Decimal", "decimal"),
+            ("System.DateTime", "DateTime"),
+        ] {
+            alias = alias.replace(from, to);
+        }
+
+        alias
     }
 
     pub fn class(&self) -> Il2CppClass {
@@ -219,7 +222,7 @@ impl Il2CppClass {
                 }
             }
 
-            if let Some((i, actual)) = mismatch {
+            if let Some((_i, _actual)) = mismatch {
                 continue;
             }
 
@@ -234,35 +237,35 @@ impl Il2CppClass {
     }
 }
 
-#[il2cpp_ffi_ref_type("System.Runtime.InteropServices.Marshal")]
-pub struct System_RuntimeInteropServices_Marshal;
+// #[il2cpp_ref_type("System.Runtime.InteropServices.Marshal")]
+// pub struct System_RuntimeInteropServices_Marshal;
 
-impl System_RuntimeInteropServices_Marshal {
-    #[il2cpp_method(name = "PtrToStringAnsi", args = ["System.IntPtr"])]
-    pub fn ptr_to_string_ansi(ptr: *const u8) -> Il2CppString {}
+// impl System_RuntimeInteropServices_Marshal {
+//     #[il2cpp_method(name = "PtrToStringAnsi", args = ["System.IntPtr"])]
+//     pub fn ptr_to_string_ansi(ptr: *const u8) -> Il2CppString {}
 
-    pub fn create_string(&self) -> String {
-        unsafe {
-            let str_length = *(self.0.wrapping_add(16) as *const u32);
-            let str_ptr = self.0.wrapping_add(20) as *const u16;
-            let slice = std::slice::from_raw_parts(str_ptr, str_length as usize);
-            String::from_utf16(slice).unwrap()
-        }
-    }
+//     pub fn create_string(&self) -> String {
+//         unsafe {
+//             let str_length = *(self.0.wrapping_add(16) as *const u32);
+//             let str_ptr = self.0.wrapping_add(20) as *const u16;
+//             let slice = std::slice::from_raw_parts(str_ptr, str_length as usize);
+//             String::from_utf16(slice).unwrap()
+//         }
+//     }
 
-    pub fn create_str(&self) -> Cow<'static, str> {
-        self.create_string().into()
-    }
+//     pub fn create_str(&self) -> Cow<'static, str> {
+//         self.create_string().into()
+//     }
 
-    fn create_il2cpp_string<S: AsRef<str>>(s: S) -> Il2CppString {
-        let cs = CString::new(s.as_ref()).unwrap();
-        Self::ptr_to_string_ansi(cs.as_c_str().to_bytes_with_nul().as_ptr())
-            .expect("failed to allocate il2cpp string")
-    }
-}
+//     fn create_il2cpp_string<S: AsRef<str>>(s: S) -> Il2CppString {
+//         let cs = CString::new(s.as_ref()).unwrap();
+//         Self::ptr_to_string_ansi(cs.as_c_str().to_bytes_with_nul().as_ptr())
+//             .expect("failed to allocate il2cpp string")
+//     }
+// }
 
 
-#[il2cpp_ffi_ref_type("System.String")]
+#[il2cpp_ref_type("System.String")]
 pub struct Il2CppString;
 
 impl Il2CppString {
@@ -276,14 +279,13 @@ impl Il2CppString {
         unsafe { *(self.0.byte_offset(32) as *const u16) }
     }
 
-    // #[il2cpp_method(name = "CreateString", args = ["char*"])]
-    // fn create_string(&self, buffer: *const u16) -> Il2CppString {}
+    #[il2cpp_method(name = "CreateString", args = ["char*"], extension = true)]
+    fn create_string(buffer: *const u16) -> Il2CppString {}
 
-    // pub fn new<S: AsRef<str>>(input: S) -> Result<Il2CppString, Il2CppError> {
-    //     let res = Il2CppString(null());
-    //     let ffi_str = widestring::U16CString::from_str(input).unwrap();
-    //     res.create_string(ffi_str.as_ptr())
-    // }
+    pub fn new<S: AsRef<str>>(input: S) -> Result<Il2CppString, Il2CppError> {
+        let ffi_str = widestring::U16CString::from_str(input).unwrap();
+        Il2CppString::create_string(ffi_str.as_ptr())
+    }
 }
 
 impl Display for Il2CppString {
@@ -299,7 +301,7 @@ impl Display for Il2CppString {
     }
 }
 
-#[il2cpp_ffi_ref_type("System.Array")]
+#[il2cpp_ref_type("System.Array")]
 pub struct Il2CppArray;
 
 impl Il2CppArray {
@@ -358,7 +360,7 @@ impl List {
     }
 }
 
-#[il2cpp_ffi_ref_type("System.Type")]
+#[il2cpp_ref_type("System.Type")]
 struct System_Type;
 
 impl System_Type {
@@ -366,7 +368,7 @@ impl System_Type {
     pub fn get_type_from_handle(ty: Il2CppType) -> System_Type {}
 }
 
-#[il2cpp_ffi_ref_type("System.RuntimeType")]
+#[il2cpp_ref_type("System.RuntimeType")]
 pub struct System_RuntimeType;
 
 impl System_RuntimeType {
@@ -407,7 +409,7 @@ impl System_RuntimeType {
     // }
 
     pub fn get_field<S: AsRef<str>>(&self, name: S) -> Result<Il2CppField, Il2CppError> {
-        let ffi_name = System_RuntimeInteropServices_Marshal::create_il2cpp_string(&name);
+        let ffi_name = Il2CppString::new(name.as_ref())?;
 
         let try_get = |rt: &System_RuntimeType| -> Result<Option<Il2CppField>, Il2CppError> {
             match rt._get_field(ffi_name, 60) {
@@ -447,6 +449,42 @@ impl System_RuntimeType {
     }
 }
 
+
+
+pub trait Il2CppValueType: Il2CppObject {}
+pub trait Il2CppRefType: Il2CppObject {}
+
+#[il2cpp_ref_type("System.Reflection.FieldInfo")]
+pub struct System_Reflection_FieldInfo;
+
+impl System_Reflection_FieldInfo {
+    pub fn get_il2cpp_field(&self) -> Il2CppField {
+        unsafe { Il2CppField(*((self.0.byte_offset(24)) as *const *const std::ffi::c_void)) }
+    }
+}
+
+#[il2cpp_value_type("System.UInt32")]
+pub struct System_UInt32(pub u32);
+
+#[il2cpp_value_type("System.Int32")]
+pub struct System_Int32(pub i32);
+
+#[il2cpp_value_type("System.UInt64")]
+pub struct System_UInt64(pub u64);
+
+#[il2cpp_value_type("System.Int64")]
+pub struct System_Int64(pub i64);
+
+#[il2cpp_value_type("System.Single")]
+pub struct System_Single(pub f32);
+
+#[il2cpp_value_type("System.Double")]
+pub struct System_Double(pub f64);
+
+#[il2cpp_value_type("System.Boolean")]
+pub struct System_Boolean(pub bool);
+
+
 pub trait Il2CppObject {
     fn ffi_name() -> &'static str;
     fn as_ptr(&self) -> *const std::ffi::c_void;
@@ -458,32 +496,3 @@ pub trait Il2CppObject {
     }
 }
 
-#[il2cpp_ffi_ref_type("System.Reflection.FieldInfo")]
-pub struct System_Reflection_FieldInfo;
-
-impl System_Reflection_FieldInfo {
-    pub fn get_il2cpp_field(&self) -> Il2CppField {
-        unsafe { Il2CppField(*((self.0.byte_offset(24)) as *const *const std::ffi::c_void)) }
-    }
-}
-
-#[il2cpp_ffi_value_type("System.UInt32")]
-pub struct System_UInt32(pub u32);
-
-#[il2cpp_ffi_value_type("System.Int32")]
-pub struct System_Int32(pub i32);
-
-#[il2cpp_ffi_value_type("System.UInt64")]
-pub struct System_UInt64(pub u64);
-
-#[il2cpp_ffi_value_type("System.Int64")]
-pub struct System_Int64(pub i64);
-
-#[il2cpp_ffi_value_type("System.Single")]
-pub struct System_Single(pub f32);
-
-#[il2cpp_ffi_value_type("System.Double")]
-pub struct System_Double(pub f64);
-
-#[il2cpp_ffi_value_type("System.Boolean")]
-pub struct System_Boolean(pub bool);
