@@ -10,7 +10,7 @@ pub use il2cpp_macros::{
     il2cpp_ref_type, il2cpp_value_type,
 };
 pub use types::{
-    Il2CppClass, Il2CppDomain, Il2CppField, Il2CppMethod, Il2CppObject, Il2CppPtr, Il2CppRefType,
+    Il2CppClass, Il2CppDomain, Il2CppField, Il2CppMethod, Il2CppObject, Il2CppRefType,
     Il2CppType, System_RuntimeType,
 };
 
