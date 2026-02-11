@@ -3,9 +3,10 @@ use darling::FromMeta;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
+    Expr, FnArg, Ident, ItemEnum, ItemFn, ItemStruct, LitStr, Pat, Token,
     parse::{Parse, ParseStream},
+    parse_macro_input,
     token::Paren,
-    Expr, FnArg, Ident, ItemEnum, ItemFn, ItemStruct, LitStr, Pat, Token, parse_macro_input,
 };
 
 #[derive(Debug, FromMeta)]
@@ -156,7 +157,6 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
     TokenStream::from(expanded)
 }
 
-
 /// Extract parameter names and types from function signature, skipping `self`
 fn extract_function_parameters(function_def: &ItemFn) -> (Vec<syn::Ident>, Vec<syn::Type>) {
     let mut parameter_names: Vec<syn::Ident> = Vec::new();
@@ -288,23 +288,21 @@ fn parse_il2cpp_type_args(attr: TokenStream) -> Result<Il2CppTypeArgs, TokenStre
         match arg {
             Il2CppTypeArgItem::Name(lit) => {
                 if name.is_some() {
-                    return Err(syn::Error::new_spanned(
-                        lit,
-                        "Multiple name arguments provided",
-                    )
-                    .to_compile_error()
-                    .into());
+                    return Err(
+                        syn::Error::new_spanned(lit, "Multiple name arguments provided")
+                            .to_compile_error()
+                            .into(),
+                    );
                 }
                 name = Some(lit);
             }
             Il2CppTypeArgItem::Base(ty) => {
                 if base.is_some() {
-                    return Err(syn::Error::new_spanned(
-                        ty,
-                        "Multiple base arguments provided",
-                    )
-                    .to_compile_error()
-                    .into());
+                    return Err(
+                        syn::Error::new_spanned(ty, "Multiple base arguments provided")
+                            .to_compile_error()
+                            .into(),
+                    );
                 }
                 base = Some(ty);
             }
@@ -466,13 +464,12 @@ fn generate_ffi_type_struct(struct_ident: &syn::Ident) -> proc_macro2::TokenStre
         #[repr(transparent)]
         #[derive(Debug, Copy, Clone, Eq, PartialEq)]
         pub struct #struct_ident(pub *const std::ffi::c_void);
-        
+
 
         unsafe impl Send for #struct_ident {}
         unsafe impl Sync for #struct_ident {}
     }
 }
-
 
 #[derive(Debug, FromMeta)]
 #[darling(derive_syn_parse)]
@@ -496,11 +493,16 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
     let function_def: ItemFn = syn::parse_macro_input!(input as ItemFn);
     let rust_field_name = &function_def.sig.ident;
     let il2cpp_field_name = &field_args.name;
-    
+
     // Extract the actual return type from `-> Type`
     let field_return_type = match &function_def.sig.output {
         syn::ReturnType::Default => {
-            return syn::Error::new_spanned(&function_def.sig, "Field function must have explicit return type").to_compile_error().into();
+            return syn::Error::new_spanned(
+                &function_def.sig,
+                "Field function must have explicit return type",
+            )
+            .to_compile_error()
+            .into();
         }
         syn::ReturnType::Type(_, ty) => ty,
     };
@@ -561,26 +563,32 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-        pub fn #rust_field_name(#receiver) -> Result<#field_return_type, Il2CppError>
-        where 
-            #field_return_type: ::il2cpp_runtime::Il2CppRefType,
-        {
-            #null_check
-            let class = #class_expr;
-            let field_info = class.get_field(#il2cpp_field_name)?;
+            pub fn #rust_field_name(#receiver) -> Result<#field_return_type, Il2CppError>
+            where
+                #field_return_type: ::il2cpp_runtime::Il2CppRefType,
+            {
+                #null_check
+                let class = #class_expr;
+                ::il2cpp_runtime::__log_debug(format_args!(
+                    "[il2cpp_field] Resolving {}::{}",
+                    class.get_il2cpp_type().name(),
+                    #il2cpp_field_name
+                ));
+                let field_info = class.get_field(#il2cpp_field_name)?;
 
-            ::il2cpp_runtime::__log_debug(format_args!(
-                "[il2cpp_field] Resolving {}::{}",
-                class.get_il2cpp_type().name(),
-                #il2cpp_field_name
-            ));
-            let value = field_info.get_value(#instance_expr)?;
-            if value.is_null() {
-                return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
+                let value = field_info.get_value(#instance_expr)?;
+                if value.is_null() {
+                    return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
+                }
+                ::il2cpp_runtime::__log_debug(format_args!(
+                    "[il2cpp_field] Resolved {}::{}",
+                    class.get_il2cpp_type().name(),
+                    #il2cpp_field_name
+                ));
+
+                Ok(unsafe { std::mem::transmute(value) })
             }
-            Ok(unsafe { std::mem::transmute(value) })
-        }
-    };
+        };
     TokenStream::from(expanded)
 }
 
@@ -620,9 +628,7 @@ pub fn il2cpp_enum_type(attr: TokenStream, item: TokenStream) -> TokenStream {
     let boxed_ident = Ident::new(&format!("{}__Boxed", ident), ident.span());
     let name_lit = LitStr::new(&ident.to_string(), ident.span());
 
-    enum_def
-        .attrs
-        .push(syn::parse_quote!(#[repr(#repr_type)]));
+    enum_def.attrs.push(syn::parse_quote!(#[repr(#repr_type)]));
     enum_def
         .attrs
         .push(syn::parse_quote!(#[derive(Debug, Copy, Clone, Eq, PartialEq)]));
