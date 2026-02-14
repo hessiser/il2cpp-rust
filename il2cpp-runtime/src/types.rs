@@ -190,6 +190,33 @@ impl Il2CppClass {
     //         .find(|&method| method.name() == name)
     // }
 
+    fn try_find_method_in_class(
+        &self,
+        name: &str,
+        arg_types: &[&str],
+    ) -> Option<Il2CppMethod> {
+        for method in self.methods().iter().filter(|m| m.name() == name) {
+            let count = method.args_cnt() as usize;
+
+            if count != arg_types.len() {
+                continue;
+            }
+
+            let mut mismatch = false;
+            for (i, arg_type) in arg_types.iter().enumerate() {
+                if *arg_type != method.arg_type_formatted(i as u32) {
+                    mismatch = true;
+                    break;
+                }
+            }
+
+            if !mismatch {
+                return Some(*method);
+            }
+        }
+        None
+    }
+
     pub fn find_method(
         &self,
         name: &str,
@@ -204,29 +231,29 @@ impl Il2CppClass {
         }
 
         let qualified_name = format!("{}::{}", self.name(), name);
-        let mut saw_name_match = false;
 
-        for method in self.methods().iter().filter(|m| m.name() == name) {
-            saw_name_match = true;
-            let count = method.args_cnt() as usize;
+        // Try to find method in this class
+        if let Some(method) = self.try_find_method_in_class(name, &arg_types) {
+            return Ok(method);
+        }
 
-            if count != arg_types.len() {
-                continue;
-            }
-
-            let mut mismatch: Option<(usize, String)> = None;
-            for (i, arg_type) in arg_types.iter().enumerate() {
-                if *arg_type != method.arg_type_formatted(i as u32) {
-                    mismatch = Some((i, method.arg_type_formatted(i as u32)));
-                    break;
+        // Try base type if available
+        if let Ok(base_type) = System_RuntimeType::from_class(*self) {
+            if let Ok(base_rt) = base_type.get_base_type() {
+                let base_class = base_rt.get_il2cpp_type().class();
+                if !base_class.0.is_null() {
+                    if let Ok(method) = base_class.find_method(name, arg_types) {
+                        return Ok(method);
+                    }
                 }
             }
+        }
 
-            if let Some((_i, _actual)) = mismatch {
-                continue;
-            }
-
-            return Ok(*method);
+        // Check if we had the method name but wrong overload
+        let mut saw_name_match = false;
+        for method in self.methods().iter().filter(|m| m.name() == name) {
+            saw_name_match = true;
+            break;
         }
 
         if saw_name_match {
