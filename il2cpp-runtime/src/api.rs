@@ -47,9 +47,14 @@ pub fn set_api_indexes(indexes: ApiIndexTable) {
 
 il2cpp_api_table! {
     il2cpp_assembly_get_image(assembly: Il2CppAssembly) -> Il2CppImage;
+    // Optional
+    il2cpp_class_get_fields(klass: Il2CppClass, iter: *const *const c_void) -> Il2CppField;
     il2cpp_class_get_methods(klass: Il2CppClass, iter: *const *const usize) -> Il2CppMethod;
     il2cpp_class_get_name(klass: Il2CppClass) -> *const i8;
     il2cpp_class_from_type(r#type: Il2CppType) -> Il2CppClass;
+    il2cpp_field_get_type(field: Il2CppField) -> Il2CppType;
+    // Optional
+    il2cpp_field_get_offset(field: Il2CppField) -> usize;
     il2cpp_domain_get() -> Il2CppDomain;
     il2cpp_domain_get_assemblies(domain: Il2CppDomain, size: *mut usize) -> *mut Il2CppAssembly;
     il2cpp_field_get_name(field: Il2CppField) -> *const i8;

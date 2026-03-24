@@ -5,7 +5,8 @@ use std::os::raw::c_void;
 use std::ptr::null;
 
 use il2cpp_macros::{
-    ffi_type, il2cpp_field, il2cpp_getter_property, il2cpp_method, il2cpp_ref_type, il2cpp_value_type
+    ffi_type, il2cpp_field, il2cpp_getter_property, il2cpp_method, il2cpp_ref_type,
+    il2cpp_value_type,
 };
 
 use crate::api::{
@@ -190,23 +191,28 @@ impl Il2CppClass {
     //         .find(|&method| method.name() == name)
     // }
 
-    pub fn find_method(
+    pub fn find_method<S: AsRef<str>>(
         &self,
-        name: &str,
-        arg_types: Vec<&str>,
+        name: S,
+        arg_types: Vec<S>,
     ) -> Result<Il2CppMethod, Il2CppError> {
         if self.0.is_null() {
             crate::__log_debug(format_args!(
                 "[il2cpp_runtime] find_method called with null Il2CppClass for '{}'",
-                name
+                name.as_ref()
             ));
             return Err(Il2CppError::NullPointerDereference);
         }
 
-        let qualified_name = format!("{}::{}", self.name(), name);
+        let qualified_name = format!("{}::{}", self.name(), name.as_ref());
         let mut saw_name_match = false;
 
-        for method in self.methods().iter().filter(|m| m.name() == name) {
+        for method in self
+            .methods()
+            .iter()
+            // wildcard support: if the provided name is "*", it matches any method name
+            .filter(|m| if name.as_ref() == "*" { true } else { m.name() == name.as_ref() })
+        {
             saw_name_match = true;
             let count = method.args_cnt() as usize;
 
@@ -217,7 +223,7 @@ impl Il2CppClass {
             let mut mismatch: Option<(usize, String)> = None;
             for (i, arg_type) in arg_types.iter().enumerate() {
                 // Wildcard support: if the provided arg_type is "*", it matches any type
-                if *arg_type != "*" && *arg_type != method.arg_type_formatted(i as u32) {
+                if arg_type.as_ref() != "*" && *arg_type.as_ref() != method.arg_type_formatted(i as u32) {
                     mismatch = Some((i, method.arg_type_formatted(i as u32)));
                     break;
                 }
@@ -273,7 +279,6 @@ impl System_RuntimeInteropServices_Marshal {
     //         .expect("failed to allocate il2cpp string")
     // }
 }
-
 
 #[il2cpp_ref_type("System.String")]
 pub struct Il2CppString;
@@ -452,8 +457,6 @@ impl System_RuntimeType {
         unsafe { Il2CppType(*((self.0.byte_offset(16)) as *const *const c_void)) }
     }
 }
-
-
 
 pub trait Il2CppValueType: Il2CppObject {}
 pub trait Il2CppRefType: Il2CppObject {}
@@ -760,7 +763,6 @@ impl From<&System_Boolean> for bool {
     }
 }
 
-
 pub trait Il2CppObject {
     fn ffi_name() -> &'static str;
     fn as_ptr(&self) -> *const std::ffi::c_void;
@@ -771,4 +773,3 @@ pub trait Il2CppObject {
         crate::get_cached_class(Self::ffi_name())
     }
 }
-

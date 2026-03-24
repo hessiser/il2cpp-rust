@@ -1,7 +1,7 @@
 pub mod api;
 pub mod errors;
 pub mod types;
-mod utils;
+pub mod utils;
 
 extern crate self as il2cpp_runtime;
 
@@ -35,19 +35,23 @@ static API_TABLE_OFFSET: OnceLock<usize> = OnceLock::new();
 
 static TYPE_TABLE: OnceLock<HashMap<Cow<'static, str>, Il2CppClass>> = OnceLock::new();
 
-pub fn get_cached_class(key: &str) -> Result<Il2CppClass, Il2CppError> {
+pub fn get_cached_class<S: AsRef<str>>(key: S) -> Result<Il2CppClass, Il2CppError> {
     TYPE_TABLE
         .get()
         .ok_or(Il2CppError::TypeTableError)?
-        .get(key)
-        .ok_or_else(|| Il2CppError::CachedClassError(key.to_string()))
+        .get(key.as_ref())
+        .ok_or_else(|| Il2CppError::CachedClassError(key.as_ref().to_string()))
         .cloned()
+}
+
+pub fn get_type_table() -> Result<&'static HashMap<Cow<'static, str>, Il2CppClass>, Il2CppError> {
+    TYPE_TABLE.get().ok_or(Il2CppError::TypeTableError)
 }
 
 pub fn init(api_table_offset: usize, indexes: api::ApiIndexTable) -> Result<(), Il2CppError> {
     let _ = API_TABLE_OFFSET.set(api_table_offset);
     api::set_api_indexes(indexes);
-    let mut type_table = HashMap::with_capacity(50_000);
+    let mut type_table = HashMap::new();
 
     let domain = api::il2cpp_domain_get();
     api::il2cpp_thread_attach(domain);
