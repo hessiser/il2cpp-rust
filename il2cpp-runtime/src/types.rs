@@ -249,6 +249,9 @@ pub struct System_Enum;
 impl System_Enum {
     #[il2cpp_method(name = "GetName", args = ["System.Type", "object"])]
     pub fn get_name(ty: System_Type, value: *const c_void) -> Il2CppString {}
+
+    #[il2cpp_method(name = "Parse", args = ["System.Type", "string"])]
+    pub fn parse(ty: System_Type, value: Il2CppString) -> *const c_void {}
 }
 
 #[il2cpp_ref_type("System.Runtime.InteropServices.Marshal")]
@@ -375,6 +378,9 @@ struct System_Type;
 impl System_Type {
     #[il2cpp_method(name = "GetTypeFromHandle", args = ["System.RuntimeTypeHandle"])]
     pub fn get_type_from_handle(ty: Il2CppType) -> System_Type {}
+
+    #[il2cpp_method(name = "GetType", args = ["string"])]
+    pub fn get_type(name: Il2CppString) -> System_Type {}
 }
 
 #[il2cpp_ref_type("System.RuntimeType")]

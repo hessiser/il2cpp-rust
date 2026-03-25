@@ -106,6 +106,7 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut function_signature = function_def.sig.clone();
     function_signature.output = syn::parse_quote!(-> Result<#il2cpp_return_type, Il2CppError>);
 
+
     let expanded = quote! {
         #function_vis #function_signature {
             static IL2CPP_METHOD_CACHE: std::sync::OnceLock<
@@ -122,7 +123,6 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                     stringify!(#(#il2cpp_method_args),*),
                     #is_static_method
                 ));
-
                 let method_info = match class
                     .find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*])
                 {
@@ -135,13 +135,52 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                         method_info
                     }
                     Err(e) => {
+
+                        // If resolution failed, check if method is on an interface implemented by the class
+                        let mut iter: *const usize = std::ptr::null();
+                        let mut resolved_from_interface = None;
+
+                        loop {
+                            let interface = ::il2cpp_runtime::api::il2cpp_class_get_parent(class, &iter);
+                            if interface.0.is_null() {
+                                break;
+                            }
+
+                            match interface.find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*]) {
+                                Ok(method_info) => {
+                                    ::il2cpp_runtime::__log_debug(format_args!(
+                                        "[il2cpp_method] Resolved {}::{} via interface {}",
+                                        class.name(),
+                                        stringify!(#il2cpp_method_name),
+                                        interface.name()
+                                    ));
+                                    resolved_from_interface = Some(method_info);
+                                    break;
+                                }
+                                Err(interface_err) => {
+                                    ::il2cpp_runtime::__log_debug(format_args!(
+                                        "[il2cpp_method] Interface {} did not resolve {}::{}: {}",
+                                        interface.name(),
+                                        class.name(),
+                                        stringify!(#il2cpp_method_name),
+                                        interface_err
+                                    ));
+                                }
+                            }
+                        }
+
                         ::il2cpp_runtime::__log_debug(format_args!(
-                            "[il2cpp_method] Failed to resolve {}::{}: {}",
+                            "[il2cpp_method] Failed to resolve {}::{} on class {}: {}",
                             class.name(),
                             stringify!(#il2cpp_method_name),
+                            class.name(),
                             e
                         ));
-                        return Err(e);
+
+                        match resolved_from_interface {
+                            Some(method_info) => method_info,
+                            None => return Err(e),
+                        }
                     }
                 };
 
