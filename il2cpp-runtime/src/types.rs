@@ -166,6 +166,7 @@ impl Il2CppDomain {
 impl Il2CppClass {
     pub fn name(&self) -> Cow<'static, str> {
         unsafe { utils::cstr_to_str(il2cpp_class_get_name(*self)) }
+        // self.byval_arg().name()
     }
 
     pub fn byval_arg(&self) -> Il2CppType {
@@ -388,11 +389,15 @@ pub struct System_RuntimeType;
 
 impl System_RuntimeType {
     // cs_property!(pub base_type, "get_BaseType", RuntimeType, self);
-    #[il2cpp_method(name = "GetBaseType", args = [])]
-    pub fn GetBaseType(&self) -> System_RuntimeType {}
+    #[il2cpp_getter_property(property = "BaseType")]
+    pub fn get_base_type(&self) -> System_RuntimeType {}
 
     #[il2cpp_method(name = "GetField", args = ["string", "System.Reflection.BindingFlags"])]
     fn _get_field(&self, name: Il2CppString, binding_flags: i32) -> System_Reflection_FieldInfo {}
+
+    // 	public override System.Reflection.FieldInfo[] GetFields(System.Reflection.BindingFlags) { }
+    #[il2cpp_method(name = "GetFields", args = ["System.Reflection.BindingFlags"])]
+    fn _get_fields(&self, binding_flags: i32) -> Il2CppArray {}
 
     // pub fn get_field<S: AsRef<str>>(&self, name: S) -> Result<Il2CppField, Il2CppError> {
     //     let ffi_name = System_RuntimeInteropServices_Marshal::create_il2cpp_string(&name);
@@ -423,28 +428,75 @@ impl System_RuntimeType {
     //     })
     // }
 
-    pub fn get_field<S: AsRef<str>>(&self, name: S) -> Result<Il2CppField, Il2CppError> {
-        let ffi_name = Il2CppString::new(name.as_ref())?;
-
+    pub fn get_field<S: AsRef<str>>(self, name: S) -> Result<Il2CppField, Il2CppError> {
+        let field_name = name.as_ref();
         let try_get = |rt: &System_RuntimeType| -> Result<Option<Il2CppField>, Il2CppError> {
-            match rt._get_field(ffi_name, 60) {
-                Ok(field) if field.0 != std::ptr::null() => Ok(Some(field.get_il2cpp_field())),
-                Ok(_) => Ok(None),
-                Err(_) => Ok(None),
+            let fields = rt._get_fields(62)?.to_vec::<System_Reflection_FieldInfo>();
+
+            for field_info in fields.iter() {
+                let field = field_info.get_il2cpp_field();
+                let runtime_field_name = field.name();
+
+                if runtime_field_name.as_ref() == field_name {
+                    return Ok(Some(field));
+                }
             }
+
+            Ok(None)
         };
 
-        if let Some(field) = try_get(self)? {
-            return Ok(field);
+        let mut current = self;
+
+        loop {
+            if current.0.is_null() {
+                crate::__log_debug(format_args!(
+                    "[il2cpp_runtime] get_field reached null runtime type while resolving '{}'",
+                    field_name
+                ));
+                break;
+            }
+
+            crate::__log_debug(format_args!(
+                "[il2cpp_runtime] get_field trying '{}' on type '{}'",
+                field_name,
+                current.get_il2cpp_type().name()
+            ));
+
+            if let Some(field) = try_get(&current)? {
+                crate::__log_debug(format_args!(
+                    "[il2cpp_runtime] get_field resolved '{}' on type '{}'",
+                    field_name,
+                    current.get_il2cpp_type().name()
+                ));
+                return Ok(field);
+            }
+
+            let base_type = current.get_base_type()?;
+            if base_type.0.is_null() || base_type.0 == current.0 {
+                crate::__log_debug(format_args!(
+                    "[il2cpp_runtime] get_field no further base type while resolving '{}' from '{}'",
+                    field_name,
+                    self.get_il2cpp_type().name()
+                ));
+                break;
+            }
+
+            crate::__log_debug(format_args!(
+                "[il2cpp_runtime] get_field falling back to base type '{}' for '{}'",
+                base_type.get_il2cpp_type().name(),
+                field_name
+            ));
+            current = base_type;
         }
 
-        let base_type = self.GetBaseType()?;
-        if let Some(field) = try_get(&base_type)? {
-            return Ok(field);
-        }
+        crate::__log_error(format_args!(
+            "[il2cpp_runtime] get_field failed to resolve '{}' from '{}'",
+            field_name,
+            self.get_il2cpp_type().name()
+        ));
 
         Err(Il2CppError::FieldNotFound {
-            field_name: name.as_ref().to_string(),
+            field_name: field_name.to_string(),
             type_name: self.get_il2cpp_type().name().to_string(),
         })
     }
@@ -471,7 +523,7 @@ pub trait Il2CppRefType: Il2CppObject {}
 pub struct System_Reflection_FieldInfo;
 
 impl System_Reflection_FieldInfo {
-    pub fn get_il2cpp_field(&self) -> Il2CppField {
+    pub fn get_il2cpp_field(self) -> Il2CppField {
         unsafe { Il2CppField(*((self.0.byte_offset(24)) as *const *const std::ffi::c_void)) }
     }
 }

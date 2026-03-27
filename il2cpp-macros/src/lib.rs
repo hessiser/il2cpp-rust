@@ -3,7 +3,7 @@ use darling::FromMeta;
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
-    Expr, FnArg, Ident, ItemEnum, ItemFn, ItemStruct, LitStr, Pat, Token,
+    FnArg, Ident, ItemEnum, ItemFn, ItemStruct, LitStr, Pat, Token,
     parse::{Parse, ParseStream},
     parse_macro_input,
     token::Paren,
@@ -19,7 +19,7 @@ struct MethodMacroArgs {
     extension: bool,
 }
 
-/// Generates an IL2CPP method wrapper that resolves and caches the target method,
+/// Generates an IL2CPP method wrapper that resolves the target method,
 /// then calls it. The generated function returns `Result<_, Il2CppError>`.
 #[proc_macro_attribute]
 pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
@@ -67,11 +67,11 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
 
     // Generate method call based on whether it's static, instance, or extension method
     let method_call = if is_static_method {
-        quote! { cached_method(#(#parameter_names),*) }
+        quote! { method(#(#parameter_names),*) }
     } else if macro_args.extension {
-        quote! { cached_method(core::ptr::null(), #(#parameter_names),*) }
+        quote! { method(core::ptr::null(), #(#parameter_names),*) }
     } else {
-        quote! { cached_method(self.0, #(#parameter_names),*) }
+        quote! { method(self.0, #(#parameter_names),*) }
     };
 
     let extern_fn_params = if is_static_method {
@@ -85,6 +85,11 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
             let class = match Self::get_class_static() {
                 Ok(class) => class,
                 Err(e) => {
+                    log_method_error(format_args!(
+                        "[il2cpp_method] Failed to get static class for {}: {}",
+                        stringify!(#il2cpp_method_name),
+                        e
+                    ));
                     return Err(e);
                 }
             };
@@ -92,6 +97,10 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
     } else {
         quote! {
             if self.0.is_null() {
+                log_method_error(format_args!(
+                    "[il2cpp_method] Null self pointer while calling {}",
+                    stringify!(#il2cpp_method_name)
+                ));
                 return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
             }
             let class = self.get_class();
@@ -106,70 +115,66 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
     let mut function_signature = function_def.sig.clone();
     function_signature.output = syn::parse_quote!(-> Result<#il2cpp_return_type, Il2CppError>);
 
+    let method_resolution = quote! {
+        #class_retrieval
 
-    let expanded = quote! {
-        #function_vis #function_signature {
-            static IL2CPP_METHOD_CACHE: std::sync::OnceLock<
-                Result<extern "C" fn(#extern_fn_params) -> #il2cpp_return_type, Il2CppError>
-            > = std::sync::OnceLock::new();
-
-            let cached_method = match IL2CPP_METHOD_CACHE.get_or_init(|| {
-                #class_retrieval
-
+        ::il2cpp_runtime::__log_debug(format_args!(
+            "[il2cpp_method] Resolving {}::{} (args: {}, static: {})",
+            class.name(),
+            stringify!(#il2cpp_method_name),
+            stringify!(#(#il2cpp_method_args),*),
+            #is_static_method
+        ));
+        let method_info = match class
+            .find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*])
+        {
+            Ok(method_info) => {
                 ::il2cpp_runtime::__log_debug(format_args!(
-                    "[il2cpp_method] Resolving {}::{} (args: {}, static: {})",
+                    "[il2cpp_method] Resolved {}::{}",
                     class.name(),
-                    stringify!(#il2cpp_method_name),
-                    stringify!(#(#il2cpp_method_args),*),
-                    #is_static_method
+                    stringify!(#il2cpp_method_name)
                 ));
-                let method_info = match class
-                    .find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*])
-                {
-                    Ok(method_info) => {
-                        ::il2cpp_runtime::__log_debug(format_args!(
-                            "[il2cpp_method] Resolved {}::{}",
-                            class.name(),
-                            stringify!(#il2cpp_method_name)
-                        ));
-                        method_info
+                method_info
+            }
+            Err(e) => {
+
+                // If resolution failed, check if method is on an interface implemented by the class
+                let mut iter: *const usize = std::ptr::null();
+                let mut resolved_from_interface = None;
+
+                loop {
+                    let interface = ::il2cpp_runtime::api::il2cpp_class_get_parent(class, &iter);
+                    if interface.0.is_null() {
+                        break;
                     }
-                    Err(e) => {
 
-                        // If resolution failed, check if method is on an interface implemented by the class
-                        let mut iter: *const usize = std::ptr::null();
-                        let mut resolved_from_interface = None;
-
-                        loop {
-                            let interface = ::il2cpp_runtime::api::il2cpp_class_get_parent(class, &iter);
-                            if interface.0.is_null() {
-                                break;
-                            }
-
-                            match interface.find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*]) {
-                                Ok(method_info) => {
-                                    ::il2cpp_runtime::__log_debug(format_args!(
-                                        "[il2cpp_method] Resolved {}::{} via interface {}",
-                                        class.name(),
-                                        stringify!(#il2cpp_method_name),
-                                        interface.name()
-                                    ));
-                                    resolved_from_interface = Some(method_info);
-                                    break;
-                                }
-                                Err(interface_err) => {
-                                    ::il2cpp_runtime::__log_debug(format_args!(
-                                        "[il2cpp_method] Interface {} did not resolve {}::{}: {}",
-                                        interface.name(),
-                                        class.name(),
-                                        stringify!(#il2cpp_method_name),
-                                        interface_err
-                                    ));
-                                }
-                            }
+                    match interface.find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*]) {
+                        Ok(method_info) => {
+                            ::il2cpp_runtime::__log_debug(format_args!(
+                                "[il2cpp_method] Resolved {}::{} via interface {}",
+                                class.name(),
+                                stringify!(#il2cpp_method_name),
+                                interface.name()
+                            ));
+                            resolved_from_interface = Some(method_info);
+                            break;
                         }
+                        Err(interface_err) => {
+                            log_method_error(format_args!(
+                                "[il2cpp_method] Interface {} did not resolve {}::{}: {}",
+                                interface.name(),
+                                class.name(),
+                                stringify!(#il2cpp_method_name),
+                                interface_err
+                            ));
+                        }
+                    }
+                }
 
-                        ::il2cpp_runtime::__log_debug(format_args!(
+                match resolved_from_interface {
+                    Some(method_info) => method_info,
+                    None => {
+                        log_method_error(format_args!(
                             "[il2cpp_method] Failed to resolve {}::{} on class {}: {}",
                             class.name(),
                             stringify!(#il2cpp_method_name),
@@ -177,18 +182,42 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                             e
                         ));
 
-                        match resolved_from_interface {
-                            Some(method_info) => method_info,
-                            None => return Err(e),
-                        }
-                    }
-                };
+                        return Err(e)
+                    },
+                }
+            }
+        };
 
-                Ok(unsafe { std::mem::transmute(method_info.va()) })
-            }) {
-                Ok(f) => *f,
-                Err(e) => return Err(e.clone()),
-            };
+        Ok(unsafe { std::mem::transmute(method_info.va()) })
+    };
+
+    let method_binding = quote! {
+        let method: extern "C" fn(#extern_fn_params) -> #il2cpp_return_type = match (|| {
+            #method_resolution
+        })() {
+            Ok(method) => method,
+            Err(e) => {
+                log_method_error(format_args!(
+                    "[il2cpp_method] Resolver returned error for {}: {}",
+                    stringify!(#il2cpp_method_name),
+                    e
+                ));
+                return Err(e);
+            }
+        };
+    };
+
+    let expanded = quote! {
+        #function_vis #function_signature {
+            fn log_method_error(args: std::fmt::Arguments<'_>) {
+                ::il2cpp_runtime::__log_error(args);
+            }
+
+            #method_binding
+            ::il2cpp_runtime::__log_debug(format_args!(
+                "[il2cpp_method] Calling {}",
+                stringify!(#il2cpp_method_name)
+            ));
             Ok(#method_call)
         }
     };
@@ -582,6 +611,10 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
     let null_check = if has_self {
         quote! {
             if self.0.is_null() {
+                log_field_error(format_args!(
+                    "[il2cpp_field] Null self pointer while resolving {}",
+                    #il2cpp_field_name
+                ));
                 return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
             }
         }
@@ -602,32 +635,63 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
     };
 
     let expanded = quote! {
-            pub fn #rust_field_name(#receiver) -> Result<#field_return_type, Il2CppError>
-            where
-                #field_return_type: ::il2cpp_runtime::Il2CppRefType,
-            {
-                #null_check
-                let class = #class_expr;
-                ::il2cpp_runtime::__log_debug(format_args!(
-                    "[il2cpp_field] Resolving {}::{}",
-                    class.get_il2cpp_type().name(),
-                    #il2cpp_field_name
-                ));
-                let field_info = class.get_field(#il2cpp_field_name)?;
-
-                let value = field_info.get_value(#instance_expr)?;
-                if value.is_null() {
-                    return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
-                }
-                ::il2cpp_runtime::__log_debug(format_args!(
-                    "[il2cpp_field] Resolved {}::{}",
-                    class.get_il2cpp_type().name(),
-                    #il2cpp_field_name
-                ));
-
-                Ok(unsafe { std::mem::transmute(value) })
+        pub fn #rust_field_name(#receiver) -> Result<#field_return_type, Il2CppError>
+        where
+            #field_return_type: ::il2cpp_runtime::Il2CppRefType,
+        {
+            fn log_field_error(args: std::fmt::Arguments<'_>) {
+                ::il2cpp_runtime::__log_error(args);
             }
-        };
+
+            #null_check
+            let class = #class_expr;
+            ::il2cpp_runtime::__log_debug(format_args!(
+                "[il2cpp_field] Resolving {}::{}",
+                class.get_il2cpp_type().name(),
+                #il2cpp_field_name
+            ));
+            let field_info = match class.get_field(#il2cpp_field_name) {
+                Ok(field_info) => field_info,
+                Err(e) => {
+                    log_field_error(format_args!(
+                        "[il2cpp_field] Failed to resolve {}::{}: {}",
+                        class.get_il2cpp_type().name(),
+                        #il2cpp_field_name,
+                        e
+                    ));
+                    return Err(e);
+                }
+            };
+
+            let value = match field_info.get_value(#instance_expr) {
+                Ok(value) => value,
+                Err(e) => {
+                    log_field_error(format_args!(
+                        "[il2cpp_field] Failed to read {}::{}: {}",
+                        class.get_il2cpp_type().name(),
+                        #il2cpp_field_name,
+                        e
+                    ));
+                    return Err(e);
+                }
+            };
+            if value.is_null() {
+                log_field_error(format_args!(
+                    "[il2cpp_field] Null value for {}::{}",
+                    class.get_il2cpp_type().name(),
+                    #il2cpp_field_name
+                ));
+                return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
+            }
+            ::il2cpp_runtime::__log_debug(format_args!(
+                "[il2cpp_field] Resolved {}::{}",
+                class.get_il2cpp_type().name(),
+                #il2cpp_field_name
+            ));
+
+            Ok(unsafe { std::mem::transmute(value) })
+        }
+    };
     TokenStream::from(expanded)
 }
 

@@ -23,9 +23,14 @@ pub mod prelude {
     };
 }
 
-pub fn __log_debug(args: std::fmt::Arguments<'_>) {
+pub fn __log_debug(_args: std::fmt::Arguments<'_>) {
     #[cfg(feature = "log")]
-    log::debug!("{}", args);
+    log::debug!("{}", _args);
+}
+
+pub fn __log_error(_args: std::fmt::Arguments<'_>) {
+    #[cfg(feature = "log")]
+    log::error!("{}", _args);
 }
 
 use crate::errors::Il2CppError;
