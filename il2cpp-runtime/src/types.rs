@@ -1,12 +1,11 @@
+#![allow(non_camel_case_types)]
+
 use std::borrow::Cow;
-use std::ffi::CString;
 use std::fmt::Display;
 use std::os::raw::c_void;
-use std::ptr::null;
 
 use il2cpp_macros::{
-    ffi_type, il2cpp_field, il2cpp_getter_property, il2cpp_method, il2cpp_ref_type,
-    il2cpp_value_type,
+    ffi_type, il2cpp_getter_property, il2cpp_method, il2cpp_ref_type, il2cpp_value_type,
 };
 
 use crate::api::{
@@ -288,20 +287,20 @@ impl System_RuntimeInteropServices_Marshal {
 pub struct Il2CppString;
 
 impl Il2CppString {
-    // Do not use il2cpp_field attribute
-    // It is reliant on Il2CppString
-
     #[il2cpp_method(name = "CreateString", args = ["char*"], extension = true)]
     fn create_string(buffer: *const u16) -> Il2CppString {}
 
     pub fn new<S: AsRef<str>>(input: S) -> Result<Il2CppString, Il2CppError> {
-        let ffi_str = widestring::U16CString::from_str(input).unwrap();
-        Il2CppString::create_string(ffi_str.as_ptr())
+        let ffi_str = widestring::U16CString::from_str(input.as_ref())
+            .map_err(|e| Il2CppError::StringConversionError(e.to_string()))?;
+        unsafe { Il2CppString::create_string(ffi_str.as_ptr()) }
     }
 }
 
 impl Display for Il2CppString {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Do not use il2cpp_field attribute
+        // It is reliant on Il2CppString
         unsafe {
             let str_length = *(self.0.wrapping_add(16) as *const u32);
             let str_ptr = self.0.wrapping_add(20) as *const u16;
@@ -431,7 +430,7 @@ impl System_RuntimeType {
     pub fn get_field<S: AsRef<str>>(self, name: S) -> Result<Il2CppField, Il2CppError> {
         let field_name = name.as_ref();
         let try_get = |rt: &System_RuntimeType| -> Result<Option<Il2CppField>, Il2CppError> {
-            let fields = rt._get_fields(62)?.to_vec::<System_Reflection_FieldInfo>();
+            let fields = unsafe { rt._get_fields(62)? }.to_vec::<System_Reflection_FieldInfo>();
 
             for field_info in fields.iter() {
                 let field = field_info.get_il2cpp_field();
@@ -471,7 +470,7 @@ impl System_RuntimeType {
                 return Ok(field);
             }
 
-            let base_type = current.get_base_type()?;
+            let base_type = unsafe { current.get_base_type()? };
             if base_type.0.is_null() || base_type.0 == current.0 {
                 crate::__log_debug(format_args!(
                     "[il2cpp_runtime] get_field no further base type while resolving '{}' from '{}'",
@@ -502,9 +501,9 @@ impl System_RuntimeType {
     }
 
     pub fn from_class(class: Il2CppClass) -> Result<Self, Il2CppError> {
-        Ok(Self(
-            System_Type::get_type_from_handle(class.byval_arg())?.0,
-        ))
+        Ok(Self(unsafe {
+            System_Type::get_type_from_handle(class.byval_arg())?.0
+        }))
     }
 
     pub fn from_name(name: &str) -> Result<Self, Il2CppError> {

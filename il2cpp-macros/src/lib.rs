@@ -142,8 +142,10 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                 let mut iter: *const usize = std::ptr::null();
                 let mut resolved_from_interface = None;
 
+                let mut current = class;
+
                 loop {
-                    let interface = ::il2cpp_runtime::api::il2cpp_class_get_parent(class, &iter);
+                    let interface = ::il2cpp_runtime::api::il2cpp_class_get_parent(current, &iter);
                     if interface.0.is_null() {
                         break;
                     }
@@ -167,6 +169,7 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                                 stringify!(#il2cpp_method_name),
                                 interface_err
                             ));
+                            current = interface;
                         }
                     }
                 }
@@ -191,24 +194,48 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
         Ok(unsafe { std::mem::transmute(method_info.va()) })
     };
 
-    let method_binding = quote! {
-        let method: extern "C" fn(#extern_fn_params) -> #il2cpp_return_type = match (|| {
-            #method_resolution
-        })() {
-            Ok(method) => method,
-            Err(e) => {
-                log_method_error(format_args!(
-                    "[il2cpp_method] Resolver returned error for {}: {}",
-                    stringify!(#il2cpp_method_name),
-                    e
-                ));
-                return Err(e);
-            }
-        };
+    // Caching certain static functions somehow fixes some of the weird instability issues with certain methods??
+    // Might reintroduce caching if function is not virtual/override
+    let method_binding = if is_static_method {
+        quote! {
+            static IL2CPP_METHOD_CACHE: std::sync::OnceLock<
+                Result<extern "C" fn(#extern_fn_params) -> #il2cpp_return_type, Il2CppError>
+            > = std::sync::OnceLock::new();
+
+            let method = match IL2CPP_METHOD_CACHE.get_or_init(|| {
+                #method_resolution
+            }) {
+                Ok(f) => *f,
+                Err(e) => {
+                    log_method_error(format_args!(
+                        "[il2cpp_method] Cached resolver returned error for {}: {}",
+                        stringify!(#il2cpp_method_name),
+                        e
+                    ));
+                    return Err(e.clone());
+                }
+            };
+        }
+    } else {
+        quote! {
+            let method: extern "C" fn(#extern_fn_params) -> #il2cpp_return_type = match (|| {
+                #method_resolution
+            })() {
+                Ok(method) => method,
+                Err(e) => {
+                    log_method_error(format_args!(
+                        "[il2cpp_method] Resolver returned error for {}: {}",
+                        stringify!(#il2cpp_method_name),
+                        e
+                    ));
+                    return Err(e);
+                }
+            };
+        }
     };
 
     let expanded = quote! {
-        #function_vis #function_signature {
+        #function_vis unsafe #function_signature {
             fn log_method_error(args: std::fmt::Arguments<'_>) {
                 ::il2cpp_runtime::__log_error(args);
             }
