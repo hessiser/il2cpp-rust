@@ -58,7 +58,6 @@ il2cpp_api_table! {
     il2cpp_field_get_offset(field: Il2CppField) -> usize;
     // Optional
     il2cpp_object_new(klass: Il2CppClass) -> *const c_void;
-    
     il2cpp_domain_get() -> Il2CppDomain;
     il2cpp_domain_get_assemblies(domain: Il2CppDomain, size: *mut usize) -> *mut Il2CppAssembly;
     il2cpp_field_get_name(field: Il2CppField) -> *const i8;

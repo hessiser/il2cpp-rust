@@ -761,7 +761,7 @@ pub fn il2cpp_enum_type(attr: TokenStream, item: TokenStream) -> TokenStream {
     enum_def.attrs.push(syn::parse_quote!(#[repr(#repr_type)]));
     enum_def
         .attrs
-        .push(syn::parse_quote!(#[derive(Debug, Copy, Clone, Eq, PartialEq)]));
+        .push(syn::parse_quote!(#[derive(Debug, Copy, Clone, Eq, PartialEq, strum::EnumString, strum::Display)]));
 
     let enum_object_impl = impl_il2cpp_object(
         &ident,

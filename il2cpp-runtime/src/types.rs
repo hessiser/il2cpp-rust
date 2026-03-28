@@ -42,8 +42,8 @@ impl Il2CppImage {
 pub struct Il2CppMethod;
 
 impl Il2CppMethod {
-    pub fn name(&self) -> Cow<'static, str> {
-        unsafe { utils::cstr_to_str(il2cpp_method_get_name(*self)) }
+    pub fn name(&self) -> String {
+        unsafe { utils::cstr_to_str(il2cpp_method_get_name(*self)).into_owned() }
     }
 
     pub fn class(&self) -> Il2CppClass {
@@ -91,8 +91,8 @@ impl Il2CppMethod {
 pub struct Il2CppType;
 
 impl Il2CppType {
-    pub fn name(&self) -> Cow<'static, str> {
-        unsafe { utils::cstr_to_str(il2cpp_type_get_name(*self)) }
+    pub fn name(&self) -> String {
+        unsafe { utils::cstr_to_str(il2cpp_type_get_name(*self)).into_owned() }
     }
 
     pub fn alias_name(&self) -> String {
@@ -133,8 +133,8 @@ impl Il2CppType {
 pub struct Il2CppField;
 
 impl Il2CppField {
-    pub fn name(&self) -> Cow<'static, str> {
-        unsafe { utils::cstr_to_str(il2cpp_field_get_name(*self)) }
+    pub fn name(&self) -> String {
+        unsafe { utils::cstr_to_str(il2cpp_field_get_name(*self)).into_owned() }
     }
 
     pub fn get_value(
@@ -163,8 +163,8 @@ impl Il2CppDomain {
 }
 
 impl Il2CppClass {
-    pub fn name(&self) -> Cow<'static, str> {
-        unsafe { utils::cstr_to_str(il2cpp_class_get_name(*self)) }
+    pub fn name(&self) -> String {
+        unsafe { utils::cstr_to_str(il2cpp_class_get_name(*self)).into_owned() }
         // self.byval_arg().name()
     }
 
@@ -252,6 +252,9 @@ impl System_Enum {
 
     #[il2cpp_method(name = "Parse", args = ["System.Type", "string"])]
     pub fn parse(ty: System_Type, value: Il2CppString) -> *const c_void {}
+
+    #[il2cpp_method(name = "ToObject", args = ["System.Type", "int"])]
+    pub fn to_object_from_int(ty: System_Type, value: i32) -> *const c_void {}
 }
 
 #[il2cpp_ref_type("System.Runtime.InteropServices.Marshal")]
@@ -430,20 +433,29 @@ impl System_RuntimeType {
     pub fn get_field<S: AsRef<str>>(self, name: S) -> Result<Il2CppField, Il2CppError> {
         let field_name = name.as_ref();
         let try_get = |rt: &System_RuntimeType| -> Result<Option<Il2CppField>, Il2CppError> {
+            // For some reason this doesn't work.
+
+            // let field = unsafe { rt._get_field(Il2CppString::new(field_name)?, 62)?.get_il2cpp_field() };
+            // if field.0.is_null() {
+            //     Ok(None)
+            // } else {
+            //     Ok(Some(field))
+            // }
+
             let fields = unsafe { rt._get_fields(62)? }.to_vec::<System_Reflection_FieldInfo>();
 
             for field_info in fields.iter() {
                 let field = field_info.get_il2cpp_field();
                 let runtime_field_name = field.name();
 
-                if runtime_field_name.as_ref() == field_name {
+                if runtime_field_name == field_name {
                     return Ok(Some(field));
                 }
             }
 
             Ok(None)
-        };
 
+        };
         let mut current = self;
 
         loop {

@@ -38,7 +38,7 @@ use std::{borrow::Cow, collections::HashMap, sync::OnceLock};
 
 static API_TABLE_OFFSET: OnceLock<usize> = OnceLock::new();
 
-static TYPE_TABLE: OnceLock<HashMap<Cow<'static, str>, Il2CppClass>> = OnceLock::new();
+static TYPE_TABLE: OnceLock<HashMap<String, Il2CppClass>> = OnceLock::new();
 
 pub fn get_cached_class<S: AsRef<str>>(key: S) -> Result<Il2CppClass, Il2CppError> {
     TYPE_TABLE
@@ -49,7 +49,7 @@ pub fn get_cached_class<S: AsRef<str>>(key: S) -> Result<Il2CppClass, Il2CppErro
         .cloned()
 }
 
-pub fn get_type_table() -> Result<&'static HashMap<Cow<'static, str>, Il2CppClass>, Il2CppError> {
+pub fn get_type_table() -> Result<&'static HashMap<String, Il2CppClass>, Il2CppError> {
     TYPE_TABLE.get().ok_or(Il2CppError::TypeTableError)
 }
 
