@@ -117,25 +117,10 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
 
     let method_resolution = quote! {
         #class_retrieval
-
-        ::il2cpp_runtime::__log_debug(format_args!(
-            "[il2cpp_method] Resolving {}::{} (args: {}, static: {})",
-            class.name(),
-            stringify!(#il2cpp_method_name),
-            stringify!(#(#il2cpp_method_args),*),
-            #is_static_method
-        ));
         let method_info = match class
             .find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*])
         {
-            Ok(method_info) => {
-                ::il2cpp_runtime::__log_debug(format_args!(
-                    "[il2cpp_method] Resolved {}::{}",
-                    class.name(),
-                    stringify!(#il2cpp_method_name)
-                ));
-                method_info
-            }
+            Ok(method_info) => method_info,
             Err(e) => {
 
                 // If resolution failed, check if method is on an interface implemented by the class
@@ -152,12 +137,6 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
 
                     match interface.find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*]) {
                         Ok(method_info) => {
-                            ::il2cpp_runtime::__log_debug(format_args!(
-                                "[il2cpp_method] Resolved {}::{} via interface {}",
-                                class.name(),
-                                stringify!(#il2cpp_method_name),
-                                interface.name()
-                            ));
                             resolved_from_interface = Some(method_info);
                             break;
                         }
@@ -194,27 +173,32 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
         Ok(unsafe { std::mem::transmute(method_info.va()) })
     };
 
-    // Caching certain static functions somehow fixes some of the weird instability issues with certain methods??
-    // Might reintroduce caching if function is not virtual/override
     let method_binding = if is_static_method {
         quote! {
-            static IL2CPP_METHOD_CACHE: std::sync::OnceLock<
-                Result<extern "C" fn(#extern_fn_params) -> #il2cpp_return_type, Il2CppError>
-            > = std::sync::OnceLock::new();
+            static METHOD: ::std::sync::OnceLock<usize> = ::std::sync::OnceLock::new();
 
-            let method = match IL2CPP_METHOD_CACHE.get_or_init(|| {
-                #method_resolution
-            }) {
-                Ok(f) => *f,
-                Err(e) => {
-                    log_method_error(format_args!(
-                        "[il2cpp_method] Cached resolver returned error for {}: {}",
-                        stringify!(#il2cpp_method_name),
-                        e
-                    ));
-                    return Err(e.clone());
-                }
-            };
+            let method: extern "C" fn(#extern_fn_params) -> #il2cpp_return_type =
+                if let Some(method) = METHOD.get() {
+                    unsafe { std::mem::transmute(*method) }
+                } else {
+                    let resolved_method: extern "C" fn(#extern_fn_params) -> #il2cpp_return_type =
+                        match (|| {
+                            #method_resolution
+                        })() {
+                            Ok(method) => method,
+                            Err(e) => {
+                                log_method_error(format_args!(
+                                    "[il2cpp_method] Resolver returned error for {}: {}",
+                                    stringify!(#il2cpp_method_name),
+                                    e
+                                ));
+                                return Err(e);
+                            }
+                        };
+
+                    let _ = METHOD.set(resolved_method as usize);
+                    resolved_method
+                };
         }
     } else {
         quote! {
@@ -241,10 +225,6 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
             }
 
             #method_binding
-            ::il2cpp_runtime::__log_debug(format_args!(
-                "[il2cpp_method] Calling {}",
-                stringify!(#il2cpp_method_name)
-            ));
             Ok(#method_call)
         }
     };
@@ -671,23 +651,27 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
             }
 
             #null_check
-            let class = #class_expr;
-            ::il2cpp_runtime::__log_debug(format_args!(
-                "[il2cpp_field] Resolving {}::{}",
-                class.get_il2cpp_type().name(),
-                #il2cpp_field_name
-            ));
-            let field_info = match class.get_field(#il2cpp_field_name) {
-                Ok(field_info) => field_info,
-                Err(e) => {
-                    log_field_error(format_args!(
-                        "[il2cpp_field] Failed to resolve {}::{}: {}",
-                        class.get_il2cpp_type().name(),
-                        #il2cpp_field_name,
-                        e
-                    ));
-                    return Err(e);
-                }
+            static FIELD_INFO: ::std::sync::OnceLock<::il2cpp_runtime::Il2CppField> = ::std::sync::OnceLock::new();
+
+            let field_info = if let Some(field_info) = FIELD_INFO.get() {
+                *field_info
+            } else {
+                let class = ::il2cpp_runtime::System_RuntimeType::from_class(Self::get_class_static()?)?;
+                let resolved_field = match class.get_field(#il2cpp_field_name) {
+                    Ok(field_info) => field_info,
+                    Err(e) => {
+                        log_field_error(format_args!(
+                            "[il2cpp_field] Failed to resolve {}::{}: {}",
+                            class.get_il2cpp_type().name(),
+                            #il2cpp_field_name,
+                            e
+                        ));
+                        return Err(e);
+                    }
+                };
+
+                let _ = FIELD_INFO.set(resolved_field);
+                resolved_field
             };
 
             let value = match field_info.get_value(#instance_expr) {
@@ -695,7 +679,7 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
                 Err(e) => {
                     log_field_error(format_args!(
                         "[il2cpp_field] Failed to read {}::{}: {}",
-                        class.get_il2cpp_type().name(),
+                        <Self as ::il2cpp_runtime::Il2CppObject>::ffi_name(),
                         #il2cpp_field_name,
                         e
                     ));
@@ -705,16 +689,11 @@ pub fn il2cpp_field(args: TokenStream, input: TokenStream) -> TokenStream {
             if value.is_null() {
                 log_field_error(format_args!(
                     "[il2cpp_field] Null value for {}::{}",
-                    class.get_il2cpp_type().name(),
+                    <Self as ::il2cpp_runtime::Il2CppObject>::ffi_name(),
                     #il2cpp_field_name
                 ));
                 return Err(::il2cpp_runtime::errors::Il2CppError::NullPointerDereference);
             }
-            ::il2cpp_runtime::__log_debug(format_args!(
-                "[il2cpp_field] Resolved {}::{}",
-                class.get_il2cpp_type().name(),
-                #il2cpp_field_name
-            ));
 
             Ok(unsafe { std::mem::transmute(value) })
         }

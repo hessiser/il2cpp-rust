@@ -1,8 +1,8 @@
 #![allow(non_camel_case_types)]
 
-use std::borrow::Cow;
 use std::fmt::Display;
 use std::os::raw::c_void;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use il2cpp_macros::{
     ffi_type, il2cpp_getter_property, il2cpp_method, il2cpp_ref_type, il2cpp_value_type,
@@ -75,7 +75,7 @@ impl Il2CppMethod {
         let _ = write!(out, "{name}(");
         for param_index in 0..param_count {
             let param = il2cpp_method_get_param(*self, param_index);
-            let _ = write!(out, "{}", param.class().byval_arg().alias_name());
+            let _ = write!(out, "{}", param.alias_name());
 
             if param_index + 1 < param_count {
                 let _ = write!(out, ",");
@@ -165,11 +165,40 @@ impl Il2CppDomain {
 impl Il2CppClass {
     pub fn name(&self) -> String {
         unsafe { utils::cstr_to_str(il2cpp_class_get_name(*self)).into_owned() }
-        // self.byval_arg().name()
+    }
+
+    pub fn namespace(&self) -> String {
+        let namespace_ptr = unsafe { *((self.0.byte_offset(0x78)) as *const *const i8) };
+        if namespace_ptr.is_null() {
+            String::new()
+        } else {
+            unsafe { utils::cstr_to_str(namespace_ptr).into_owned() }
+        }
+    }
+
+    pub fn qualified_name(&self) -> String {
+        let name = self.name();
+
+        if name.contains('.') {
+            name
+        } else {
+            let namespace = match microseh::try_seh(|| {
+                catch_unwind(AssertUnwindSafe(|| self.namespace()))
+            }) {
+                Ok(Ok(namespace)) => namespace,
+                Ok(Err(_)) | Err(_) => String::new(),
+            };
+
+            if namespace.is_empty() || name.starts_with(&(namespace.clone() + ".")) {
+                name
+            } else {
+                format!("{namespace}.{name}")
+            }
+        }
     }
 
     pub fn byval_arg(&self) -> Il2CppType {
-        Il2CppType(unsafe { self.0.byte_offset(128) })
+        Il2CppType(unsafe { self.0.byte_offset(120) })
     }
 
     pub fn methods(&self) -> Vec<Il2CppMethod> {
@@ -197,14 +226,10 @@ impl Il2CppClass {
         arg_types: Vec<S>,
     ) -> Result<Il2CppMethod, Il2CppError> {
         if self.0.is_null() {
-            crate::__log_debug(format_args!(
-                "[il2cpp_runtime] find_method called with null Il2CppClass for '{}'",
-                name.as_ref()
-            ));
             return Err(Il2CppError::NullPointerDereference);
         }
 
-        let qualified_name = format!("{}::{}", self.name(), name.as_ref());
+        let qualified_name = format!("{}::{}", self.qualified_name(), name.as_ref());
         let mut saw_name_match = false;
 
         for method in self
@@ -379,6 +404,48 @@ impl List {
 struct System_Type;
 
 impl System_Type {
+    fn has_method_signature(class: Il2CppClass, name: &str, args: &[&str]) -> bool {
+        class.methods().iter().any(|method| {
+            method.name() == name
+                && method.args_cnt() as usize == args.len()
+                && args
+                    .iter()
+                    .enumerate()
+                    .all(|(index, expected)| method.arg_type_formatted(index as u32) == *expected)
+        })
+    }
+
+    fn get_class_static() -> Result<Il2CppClass, Il2CppError> {
+        let matches_signature = |class: Il2CppClass| {
+            Self::has_method_signature(class, "GetTypeFromHandle", &["System.RuntimeTypeHandle"])
+                && Self::has_method_signature(class, "GetType", &["string"])
+        };
+
+        if let Ok(class) = crate::get_cached_class("System.Type") {
+            if matches_signature(class) {
+                return Ok(class);
+            }
+        }
+
+        let table = crate::get_type_table()?;
+        let mut matches = table
+            .values()
+            .copied()
+            .filter(|class| matches_signature(*class));
+
+        if let Some(class) = matches.next() {
+            if matches.next().is_none() {
+                return Ok(class);
+            }
+        }
+
+        crate::__log_error(format_args!(
+            "[il2cpp_runtime] failed to resolve System.Type via cached lookup and method-signature scan"
+        ));
+
+        Err(Il2CppError::CachedClassError("System.Type".to_string()))
+    }
+
     #[il2cpp_method(name = "GetTypeFromHandle", args = ["System.RuntimeTypeHandle"])]
     pub fn get_type_from_handle(ty: Il2CppType) -> System_Type {}
 
@@ -460,43 +527,17 @@ impl System_RuntimeType {
 
         loop {
             if current.0.is_null() {
-                crate::__log_debug(format_args!(
-                    "[il2cpp_runtime] get_field reached null runtime type while resolving '{}'",
-                    field_name
-                ));
                 break;
             }
 
-            crate::__log_debug(format_args!(
-                "[il2cpp_runtime] get_field trying '{}' on type '{}'",
-                field_name,
-                current.get_il2cpp_type().name()
-            ));
-
             if let Some(field) = try_get(&current)? {
-                crate::__log_debug(format_args!(
-                    "[il2cpp_runtime] get_field resolved '{}' on type '{}'",
-                    field_name,
-                    current.get_il2cpp_type().name()
-                ));
                 return Ok(field);
             }
 
             let base_type = unsafe { current.get_base_type()? };
             if base_type.0.is_null() || base_type.0 == current.0 {
-                crate::__log_debug(format_args!(
-                    "[il2cpp_runtime] get_field no further base type while resolving '{}' from '{}'",
-                    field_name,
-                    self.get_il2cpp_type().name()
-                ));
                 break;
             }
-
-            crate::__log_debug(format_args!(
-                "[il2cpp_runtime] get_field falling back to base type '{}' for '{}'",
-                base_type.get_il2cpp_type().name(),
-                field_name
-            ));
             current = base_type;
         }
 
@@ -513,9 +554,20 @@ impl System_RuntimeType {
     }
 
     pub fn from_class(class: Il2CppClass) -> Result<Self, Il2CppError> {
-        Ok(Self(unsafe {
-            System_Type::get_type_from_handle(class.byval_arg())?.0
-        }))
+        let qualified_name = class.qualified_name();
+
+        // Prefer the runtime handle path on 4.2.51 CN because Type::GetType(string)
+        // can fail to resolve even when the class metadata is already cached.
+        let system_type = match unsafe { System_Type::get_type_from_handle(class.byval_arg()) } {
+            Ok(system_type) if !system_type.0.is_null() => system_type,
+            _ => unsafe { System_Type::get_type(Il2CppString::new(&qualified_name)?)? },
+        };
+
+        if system_type.0.is_null() {
+            Err(Il2CppError::CachedClassError(qualified_name))
+        } else {
+            Ok(Self(system_type.0))
+        }
     }
 
     pub fn from_name(name: &str) -> Result<Self, Il2CppError> {
@@ -839,6 +891,10 @@ pub trait Il2CppObject {
         unsafe { *((self.as_ptr()) as *const Il2CppClass) }
     }
     fn get_class_static() -> Result<Il2CppClass, crate::errors::Il2CppError> {
+        if Self::ffi_name() == "System.Type" {
+            return System_Type::get_class_static();
+        }
+
         crate::get_cached_class(Self::ffi_name())
     }
 }
