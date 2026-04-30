@@ -38,5 +38,7 @@ pub enum Il2CppError {
     },
     #[error("Failed to build UTF-16 IL2CPP string from input: {0}")]
     StringConversionError(String),
+    #[error("IL2CPP runtime stage failed: {0}")]
+    RuntimeStageFailure(String),
 }
 
