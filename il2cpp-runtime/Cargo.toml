@@ -9,7 +9,6 @@ log = ["dep:log"]
 [dependencies]
 il2cpp-macros = { path = "../il2cpp-macros" }
 log = { version = "0.4.29", optional = true }
-microseh = "1.1.2"
 patternscan = "1.2.0"
 thiserror = "2.0.18"
 widestring = "1.2.1"

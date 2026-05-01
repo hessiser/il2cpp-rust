@@ -2,7 +2,6 @@
 
 use std::fmt::Display;
 use std::os::raw::c_void;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use il2cpp_macros::{
     ffi_type, il2cpp_getter_property, il2cpp_method, il2cpp_ref_type, il2cpp_value_type,
@@ -167,36 +166,6 @@ impl Il2CppClass {
         unsafe { utils::cstr_to_str(il2cpp_class_get_name(*self)).into_owned() }
     }
 
-    pub fn namespace(&self) -> String {
-        let namespace_ptr = unsafe { *((self.0.byte_offset(0x78)) as *const *const i8) };
-        if namespace_ptr.is_null() {
-            String::new()
-        } else {
-            unsafe { utils::cstr_to_str(namespace_ptr).into_owned() }
-        }
-    }
-
-    pub fn qualified_name(&self) -> String {
-        let name = self.name();
-
-        if name.contains('.') {
-            name
-        } else {
-            let namespace = match microseh::try_seh(|| {
-                catch_unwind(AssertUnwindSafe(|| self.namespace()))
-            }) {
-                Ok(Ok(namespace)) => namespace,
-                Ok(Err(_)) | Err(_) => String::new(),
-            };
-
-            if namespace.is_empty() || name.starts_with(&(namespace.clone() + ".")) {
-                name
-            } else {
-                format!("{namespace}.{name}")
-            }
-        }
-    }
-
     pub fn byval_arg(&self) -> Il2CppType {
         Il2CppType(unsafe { self.0.byte_offset(120) })
     }
@@ -229,7 +198,7 @@ impl Il2CppClass {
             return Err(Il2CppError::NullPointerDereference);
         }
 
-        let qualified_name = format!("{}::{}", self.qualified_name(), name.as_ref());
+        let qualified_name = format!("{}::{}", self.name(), name.as_ref());
         let mut saw_name_match = false;
 
         for method in self
@@ -554,20 +523,9 @@ impl System_RuntimeType {
     }
 
     pub fn from_class(class: Il2CppClass) -> Result<Self, Il2CppError> {
-        let qualified_name = class.qualified_name();
-
-        // Prefer the runtime handle path on 4.2.51 CN because Type::GetType(string)
-        // can fail to resolve even when the class metadata is already cached.
-        let system_type = match unsafe { System_Type::get_type_from_handle(class.byval_arg()) } {
-            Ok(system_type) if !system_type.0.is_null() => system_type,
-            _ => unsafe { System_Type::get_type(Il2CppString::new(&qualified_name)?)? },
-        };
-
-        if system_type.0.is_null() {
-            Err(Il2CppError::CachedClassError(qualified_name))
-        } else {
-            Ok(Self(system_type.0))
-        }
+        Ok(Self(unsafe {
+            System_Type::get_type_from_handle(class.byval_arg())?.0
+        }))
     }
 
     pub fn from_name(name: &str) -> Result<Self, Il2CppError> {
