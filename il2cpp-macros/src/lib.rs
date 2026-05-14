@@ -17,6 +17,8 @@ struct MethodMacroArgs {
     args: darling::util::SpannedValue<Vec<LitStr>>,
     #[darling(default)]
     extension: bool,
+    #[darling(default)]
+    ret_type: Option<LitStr>,
 }
 
 /// Generates an IL2CPP method wrapper that resolves the target method,
@@ -42,6 +44,25 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
     let il2cpp_method_name = &macro_args.name;
     let il2cpp_method_args: Vec<_> = macro_args.args.iter().collect();
     let il2cpp_method_arg_count = il2cpp_method_args.len();
+    let il2cpp_method_ret_type = macro_args.ret_type.as_ref();
+
+    let make_method_lookup = |receiver: proc_macro2::TokenStream| {
+        if let Some(ret_type) = il2cpp_method_ret_type {
+            quote! {
+                #receiver.find_method_with_ret_type(
+                    #il2cpp_method_name,
+                    vec![#(#il2cpp_method_args),*],
+                    #ret_type
+                )
+            }
+        } else {
+            quote! {
+                #receiver.find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*])
+            }
+        }
+    };
+    let class_method_lookup = make_method_lookup(quote! { class });
+    let interface_method_lookup = make_method_lookup(quote! { interface });
 
     // Check if function has `self` parameter (instance method vs static method)
     let is_static_method = !function_def
@@ -125,9 +146,7 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
             stringify!(#(#il2cpp_method_args),*),
             #is_static_method
         ));
-        let method_info = match class
-            .find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*])
-        {
+        let method_info = match #class_method_lookup {
             Ok(method_info) => {
                 ::il2cpp_runtime::__log_debug(format_args!(
                     "[il2cpp_method] Resolved {}::{}",
@@ -150,7 +169,7 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                         break;
                     }
 
-                    match interface.find_method(#il2cpp_method_name, vec![#(#il2cpp_method_args),*]) {
+                    match #interface_method_lookup {
                         Ok(method_info) => {
                             ::il2cpp_runtime::__log_debug(format_args!(
                                 "[il2cpp_method] Resolved {}::{} via interface {}",

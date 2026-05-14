@@ -9,10 +9,7 @@ use il2cpp_macros::{
 };
 
 use crate::api::{
-    il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name,
-    il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object,
-    il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name,
-    il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_type_get_name,
+    il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name, il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object, il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name, il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_method_get_return_type, il2cpp_type_get_name
 };
 use crate::errors::Il2CppError;
 use crate::{get_cached_class, utils};
@@ -64,6 +61,10 @@ impl Il2CppMethod {
 
     pub fn arg_type_formatted(&self, i: u32) -> String {
         self.arg(i).alias_name()
+    }
+
+    pub fn ret_type(&self) -> Il2CppType {
+        il2cpp_method_get_return_type(*self)
     }
 
     pub fn format_params(&self) -> String {
@@ -242,6 +243,63 @@ impl Il2CppClass {
             Err(Il2CppError::MethodNotFound(qualified_name))
         }
     }
+
+    pub fn find_method_with_ret_type<S: AsRef<str>>(
+        &self,
+        name: S,
+        arg_types: Vec<S>,
+        ret_type: S,
+    ) -> Result<Il2CppMethod, Il2CppError> {
+        if self.0.is_null() {
+            crate::__log_debug(format_args!(
+                "[il2cpp_runtime] find_method called with null Il2CppClass for '{}'",
+                name.as_ref()
+            ));
+            return Err(Il2CppError::NullPointerDereference);
+        }
+
+        let qualified_name = format!("{}::{}", self.name(), name.as_ref());
+        let mut saw_name_match = false;
+
+        for method in self
+            .methods()
+            .iter()
+            // wildcard support: if the provided name is "*", it matches any method name
+            .filter(|m| if name.as_ref() == "*" { true } else { m.name() == name.as_ref() })
+        {
+            saw_name_match = true;
+            let count = method.args_cnt() as usize;
+
+            if count != arg_types.len() {
+                continue;
+            }
+
+            let mut mismatch: Option<(usize, String)> = None;
+            for (i, arg_type) in arg_types.iter().enumerate() {
+                // Wildcard support: if the provided arg_type is "*", it matches any type
+                if arg_type.as_ref() != "*" && *arg_type.as_ref() != method.arg_type_formatted(i as u32) {
+                    mismatch = Some((i, method.arg_type_formatted(i as u32)));
+                    break;
+                }
+            }
+            if ret_type.as_ref() != "*" && *ret_type.as_ref() != method.ret_type().alias_name() {
+                mismatch = Some((method.args_cnt() as usize + 1, method.ret_type().alias_name()));
+            }
+
+            if let Some((_i, _actual)) = mismatch {
+                continue;
+            }
+
+            return Ok(*method);
+        }
+
+        if saw_name_match {
+            Err(Il2CppError::NoOverloadMatched(qualified_name))
+        } else {
+            Err(Il2CppError::MethodNotFound(qualified_name))
+        }
+    }
+
 }
 
 #[il2cpp_value_type("System.Enum")]
