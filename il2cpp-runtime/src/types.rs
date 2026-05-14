@@ -401,6 +401,9 @@ impl System_RuntimeType {
     #[il2cpp_method(name = "GetFields", args = ["System.Reflection.BindingFlags"])]
     fn _get_fields(&self, binding_flags: i32) -> Il2CppArray {}
 
+    #[il2cpp_method(name = "MakeGenericType", args = ["System.Type[]"])]
+    pub fn make_generic_type(&self, args: Il2CppArray) -> System_RuntimeType {}
+
     // pub fn get_field<S: AsRef<str>>(&self, name: S) -> Result<Il2CppField, Il2CppError> {
     //     let ffi_name = System_RuntimeInteropServices_Marshal::create_il2cpp_string(&name);
     //     match self._get_field(ffi_name, 60) {
