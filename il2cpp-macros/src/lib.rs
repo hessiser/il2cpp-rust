@@ -19,6 +19,8 @@ struct MethodMacroArgs {
     extension: bool,
     #[darling(default)]
     ret_type: Option<LitStr>,
+    #[darling(default)]
+    value_type: bool,
 }
 
 /// Generates an IL2CPP method wrapper that resolves the target method,
@@ -91,17 +93,58 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
         quote! { method(#(#parameter_names),*) }
     } else if macro_args.extension {
         quote! { method(core::ptr::null(), #(#parameter_names),*) }
+    } else if macro_args.value_type {
+        quote! { method(self, #(#parameter_names),*) }
     } else {
         quote! { method(self.0, #(#parameter_names),*) }
     };
 
     let extern_fn_params = if is_static_method {
         quote! { #(#parameter_types),* }
+    } else if macro_args.value_type {
+        // For value types, we need to extract the self type from the receiver
+        let self_type = match function_def.sig.inputs.iter().next() {
+            Some(FnArg::Receiver(receiver)) => {
+                if receiver.reference.is_some() {
+                    // &self reference
+                    let ty = match &function_def.sig.inputs[0] {
+                        FnArg::Receiver(r) => {
+                            if r.reference.is_some() {
+                                quote! { &Self }
+                            } else {
+                                quote! { Self }
+                            }
+                        }
+                        _ => quote! { Self },
+                    };
+                    ty
+                } else {
+                    // self by value
+                    quote! { Self }
+                }
+            }
+            _ => quote! { Self },
+        };
+        quote! { #self_type, #(#parameter_types),* }
     } else {
         quote! { *const std::ffi::c_void, #(#parameter_types),* }
     };
 
     let class_retrieval = if is_static_method || macro_args.extension {
+        quote! {
+            let class = match Self::get_class_static() {
+                Ok(class) => class,
+                Err(e) => {
+                    log_method_error(format_args!(
+                        "[il2cpp_method] Failed to get static class for {}: {}",
+                        stringify!(#il2cpp_method_name),
+                        e
+                    ));
+                    return Err(e);
+                }
+            };
+        }
+    } else if macro_args.value_type {
         quote! {
             let class = match Self::get_class_static() {
                 Ok(class) => class,
