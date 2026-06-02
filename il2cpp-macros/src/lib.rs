@@ -184,7 +184,7 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
 
         ::il2cpp_runtime::__log_debug(format_args!(
             "[il2cpp_method] Resolving {}::{} (args: {}, static: {})",
-            class.name(),
+            class.qualified_name(),
             stringify!(#il2cpp_method_name),
             stringify!(#(#il2cpp_method_args),*),
             #is_static_method
@@ -193,7 +193,7 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
             Ok(method_info) => {
                 ::il2cpp_runtime::__log_debug(format_args!(
                     "[il2cpp_method] Resolved {}::{}",
-                    class.name(),
+                    class.qualified_name(),
                     stringify!(#il2cpp_method_name)
                 ));
                 method_info
@@ -216,9 +216,9 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                         Ok(method_info) => {
                             ::il2cpp_runtime::__log_debug(format_args!(
                                 "[il2cpp_method] Resolved {}::{} via interface {}",
-                                class.name(),
+                                class.qualified_name(),
                                 stringify!(#il2cpp_method_name),
-                                interface.name()
+                                interface.qualified_name()
                             ));
                             resolved_from_interface = Some(method_info);
                             break;
@@ -226,8 +226,8 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                         Err(interface_err) => {
                             log_method_error(format_args!(
                                 "[il2cpp_method] Interface {} did not resolve {}::{}: {}",
-                                interface.name(),
-                                class.name(),
+                                interface.qualified_name(),
+                                class.qualified_name(),
                                 stringify!(#il2cpp_method_name),
                                 interface_err
                             ));
@@ -241,9 +241,9 @@ pub fn il2cpp_method(args: TokenStream, input: TokenStream) -> TokenStream {
                     None => {
                         log_method_error(format_args!(
                             "[il2cpp_method] Failed to resolve {}::{} on class {}: {}",
-                            class.name(),
+                            class.qualified_name(),
                             stringify!(#il2cpp_method_name),
-                            class.name(),
+                            class.qualified_name(),
                             e
                         ));
 

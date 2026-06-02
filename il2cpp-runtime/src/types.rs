@@ -15,22 +15,6 @@ use crate::utils::cstr_to_str;
 use crate::{get_cached_class, utils};
 
 #[ffi_type]
-pub struct Il2CppClass;
-
-impl Il2CppClass {
-    pub fn qualified_name(self) -> String {
-        let namespace = unsafe { cstr_to_str(il2cpp_class_get_namespace(self)) }.to_string();
-        let type_name = unsafe { cstr_to_str(il2cpp_class_get_name(self)) }.to_string();
-
-        if namespace.is_empty() {
-            type_name
-        } else {
-            format!("{}.{}", namespace, type_name)
-        }
-    }
-}
-
-#[ffi_type]
 pub struct Il2CppAssembly;
 
 #[ffi_type]
@@ -80,25 +64,25 @@ impl Il2CppMethod {
         il2cpp_method_get_return_type(*self)
     }
 
-    pub fn format_params(&self) -> String {
-        use std::fmt::Write;
-        let param_count = il2cpp_method_get_param_count(*self);
-        let name = self.name();
-        let mut out = String::with_capacity(0);
+    // pub fn format_params(&self) -> String {
+    //     use std::fmt::Write;
+    //     let param_count = il2cpp_method_get_param_count(*self);
+    //     let name = self.name();
+    //     let mut out = String::with_capacity(0);
 
-        let _ = write!(out, "{name}(");
-        for param_index in 0..param_count {
-            let param = il2cpp_method_get_param(*self, param_index);
-            let _ = write!(out, "{}", param.class().byval_arg().alias_name());
+    //     let _ = write!(out, "{name}(");
+    //     for param_index in 0..param_count {
+    //         let param = il2cpp_method_get_param(*self, param_index);
+    //         let _ = write!(out, "{}", param.class().qualified_name());
 
-            if param_index + 1 < param_count {
-                let _ = write!(out, ",");
-            }
-        }
-        let _ = write!(out, ")");
+    //         if param_index + 1 < param_count {
+    //             let _ = write!(out, ",");
+    //         }
+    //     }
+    //     let _ = write!(out, ")");
 
-        out
-    }
+    //     out
+    // }
 }
 
 #[ffi_type]
@@ -176,14 +160,23 @@ impl Il2CppDomain {
     }
 }
 
+#[ffi_type]
+pub struct Il2CppClass;
+
 impl Il2CppClass {
-    pub fn name(&self) -> String {
-        unsafe { utils::cstr_to_str(il2cpp_class_get_name(*self)).into_owned() }
-        // self.byval_arg().name()
+    pub fn qualified_name(self) -> String {
+        let namespace = unsafe { cstr_to_str(il2cpp_class_get_namespace(self)) }.to_string();
+        let type_name = unsafe { cstr_to_str(il2cpp_class_get_name(self)) }.to_string();
+
+        if namespace.is_empty() {
+            type_name
+        } else {
+            format!("{}.{}", namespace, type_name)
+        }
     }
 
     pub fn byval_arg(&self) -> Il2CppType {
-        Il2CppType(unsafe { self.0.byte_offset(128) })
+        Il2CppType(unsafe { self.0.byte_offset(120) })
     }
 
     pub fn methods(&self) -> Vec<Il2CppMethod> {
@@ -199,33 +192,27 @@ impl Il2CppClass {
         result
     }
 
-    // pub fn find_method_by_name(&self, name: &str) -> Option<Il2CppMethod> {
-    //     self.methods()
-    //         .into_iter()
-    //         .find(|&method| method.name() == name)
-    // }
-
     pub fn find_method<S: AsRef<str>>(
         &self,
-        name: S,
+        method_name: S,
         arg_types: Vec<S>,
     ) -> Result<Il2CppMethod, Il2CppError> {
         if self.0.is_null() {
             crate::__log_debug(format_args!(
                 "[il2cpp_runtime] find_method called with null Il2CppClass for '{}'",
-                name.as_ref()
+                method_name.as_ref()
             ));
             return Err(Il2CppError::NullPointerDereference);
         }
 
-        let qualified_name = format!("{}::{}", self.name(), name.as_ref());
+        let qualified_name = format!("{}::{}", self.qualified_name(), method_name.as_ref());
         let mut saw_name_match = false;
 
         for method in self
             .methods()
             .iter()
             // wildcard support: if the provided name is "*", it matches any method name
-            .filter(|m| if name.as_ref() == "*" { true } else { m.name() == name.as_ref() })
+            .filter(|m| if method_name.as_ref() == "*" { true } else { m.name() == method_name.as_ref() })
         {
             saw_name_match = true;
             let count = method.args_cnt() as usize;
@@ -259,26 +246,26 @@ impl Il2CppClass {
 
     pub fn find_method_with_ret_type<S: AsRef<str>>(
         &self,
-        name: S,
+        method_name: S,
         arg_types: Vec<S>,
         ret_type: S,
     ) -> Result<Il2CppMethod, Il2CppError> {
         if self.0.is_null() {
             crate::__log_debug(format_args!(
                 "[il2cpp_runtime] find_method called with null Il2CppClass for '{}'",
-                name.as_ref()
+                method_name.as_ref()
             ));
             return Err(Il2CppError::NullPointerDereference);
         }
 
-        let qualified_name = format!("{}::{}", self.name(), name.as_ref());
+        let qualified_name = format!("{}::{}", self.qualified_name(), method_name.as_ref());
         let mut saw_name_match = false;
 
         for method in self
             .methods()
             .iter()
             // wildcard support: if the provided name is "*", it matches any method name
-            .filter(|m| if name.as_ref() == "*" { true } else { m.name() == name.as_ref() })
+            .filter(|m| if method_name.as_ref() == "*" { true } else { m.name() == method_name.as_ref() })
         {
             saw_name_match = true;
             let count = method.args_cnt() as usize;
