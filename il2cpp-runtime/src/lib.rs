@@ -34,7 +34,7 @@ pub fn __log_error(_args: std::fmt::Arguments<'_>) {
 }
 
 use crate::errors::Il2CppError;
-use std::{borrow::Cow, collections::HashMap, sync::OnceLock};
+use std::{collections::HashMap, sync::OnceLock};
 
 static API_TABLE_OFFSET: OnceLock<usize> = OnceLock::new();
 
@@ -65,8 +65,7 @@ pub fn init(api_table_offset: usize, indexes: api::ApiIndexTable) -> Result<(), 
         let image = api::il2cpp_assembly_get_image(assembly);
 
         for class in image.classes() {
-            let type_name = class.byval_arg().name();
-            type_table.insert(type_name, class);
+            type_table.insert(class.qualified_name(), class);
         }
     }
     TYPE_TABLE.set(type_table).unwrap();

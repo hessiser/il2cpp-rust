@@ -1,6 +1,5 @@
 #![allow(non_camel_case_types)]
 
-use std::borrow::Cow;
 use std::fmt::Display;
 use std::os::raw::c_void;
 
@@ -9,13 +8,27 @@ use il2cpp_macros::{
 };
 
 use crate::api::{
-    il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name, il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object, il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name, il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_method_get_return_type, il2cpp_type_get_name
+    il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name, il2cpp_class_get_namespace, il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object, il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name, il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_method_get_return_type, il2cpp_type_get_name
 };
 use crate::errors::Il2CppError;
+use crate::utils::cstr_to_str;
 use crate::{get_cached_class, utils};
 
 #[ffi_type]
 pub struct Il2CppClass;
+
+impl Il2CppClass {
+    pub fn qualified_name(self) -> String {
+        let namespace = unsafe { cstr_to_str(il2cpp_class_get_namespace(self)) }.to_string();
+        let type_name = unsafe { cstr_to_str(il2cpp_class_get_name(self)) }.to_string();
+
+        if namespace.is_empty() {
+            type_name
+        } else {
+            format!("{}.{}", namespace, type_name)
+        }
+    }
+}
 
 #[ffi_type]
 pub struct Il2CppAssembly;

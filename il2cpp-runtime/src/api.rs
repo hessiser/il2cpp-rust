@@ -51,6 +51,7 @@ il2cpp_api_table! {
     il2cpp_class_get_fields(klass: Il2CppClass, iter: *const *const c_void) -> Il2CppField;
     il2cpp_class_get_methods(klass: Il2CppClass, iter: *const *const usize) -> Il2CppMethod;
     il2cpp_class_get_name(klass: Il2CppClass) -> *const i8;
+    il2cpp_class_get_namespace(klass: Il2CppClass) -> *const i8;
     il2cpp_class_from_type(r#type: Il2CppType) -> Il2CppClass;
     il2cpp_class_get_parent(klass: Il2CppClass, iter: *const *const usize) -> Il2CppClass;
     il2cpp_field_get_type(field: Il2CppField) -> Il2CppType;
