@@ -49,6 +49,7 @@ il2cpp_api_table! {
     il2cpp_assembly_get_image(assembly: Il2CppAssembly) -> Il2CppImage;
     // Optional
     il2cpp_class_get_fields(klass: Il2CppClass, iter: *const *const c_void) -> Il2CppField;
+    il2cpp_class_get_type(klass: Il2CppClass) -> Il2CppType;
     il2cpp_class_get_methods(klass: Il2CppClass, iter: *const *const usize) -> Il2CppMethod;
     il2cpp_class_get_name(klass: Il2CppClass) -> *const i8;
     il2cpp_class_get_namespace(klass: Il2CppClass) -> *const i8;

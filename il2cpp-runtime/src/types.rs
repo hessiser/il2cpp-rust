@@ -8,7 +8,7 @@ use il2cpp_macros::{
 };
 
 use crate::api::{
-    il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name, il2cpp_class_get_namespace, il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object, il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name, il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_method_get_return_type, il2cpp_type_get_name
+    il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name, il2cpp_class_get_namespace, il2cpp_class_get_type, il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object, il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name, il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_method_get_return_type, il2cpp_type_get_name
 };
 use crate::errors::Il2CppError;
 use crate::utils::cstr_to_str;
@@ -173,10 +173,6 @@ impl Il2CppClass {
         } else {
             format!("{}.{}", namespace, type_name)
         }
-    }
-
-    pub fn byval_arg(&self) -> Il2CppType {
-        Il2CppType(unsafe { self.0.byte_offset(120) })
     }
 
     pub fn methods(&self) -> Vec<Il2CppMethod> {
@@ -575,7 +571,7 @@ impl System_RuntimeType {
 
     pub fn from_class(class: Il2CppClass) -> Result<Self, Il2CppError> {
         Ok(Self(unsafe {
-            System_Type::get_type_from_handle(class.byval_arg())?.0
+            System_Type::get_type_from_handle(il2cpp_class_get_type(class))?.0
         }))
     }
 
