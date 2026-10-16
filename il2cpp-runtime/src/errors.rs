@@ -36,7 +36,6 @@ pub enum Il2CppError {
         field_name: String,
         type_name: String,
     },
-    #[error("Failed to build UTF-16 IL2CPP string from input: {0}")]
+    #[error("Failed to build IL2CPP string from input: {0}")]
     StringConversionError(String),
 }
-

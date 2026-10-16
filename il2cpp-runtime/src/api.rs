@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::sync::OnceLock;
 
-use crate::types::{Il2CppAssembly, Il2CppClass, Il2CppDomain, Il2CppField, Il2CppImage, Il2CppMethod, Il2CppType};
+use crate::types::{Il2CppAssembly, Il2CppClass, Il2CppDomain, Il2CppField, Il2CppImage, Il2CppMethod, Il2CppString, Il2CppType};
 
 pub static API_INDEXES: OnceLock<ApiIndexTable> = OnceLock::new();
 
@@ -60,6 +60,7 @@ il2cpp_api_table! {
     il2cpp_field_get_offset(field: Il2CppField) -> usize;
     // Optional
     il2cpp_object_new(klass: Il2CppClass) -> *const c_void;
+    il2cpp_string_new_utf16(string: *const u16, length: i32) -> Il2CppString;
     il2cpp_domain_get() -> Il2CppDomain;
     il2cpp_domain_get_assemblies(domain: Il2CppDomain, size: *mut usize) -> *mut Il2CppAssembly;
     il2cpp_field_get_name(field: Il2CppField) -> *const i8;

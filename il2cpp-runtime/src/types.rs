@@ -8,7 +8,7 @@ use il2cpp_macros::{
 };
 
 use crate::api::{
-    il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name, il2cpp_class_get_namespace, il2cpp_class_get_type, il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object, il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name, il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_method_get_return_type, il2cpp_type_get_name
+    il2cpp_class_from_type, il2cpp_class_get_methods, il2cpp_class_get_name, il2cpp_class_get_namespace, il2cpp_class_get_type, il2cpp_domain_get_assemblies, il2cpp_field_get_name, il2cpp_field_get_value_object, il2cpp_image_get_class, il2cpp_image_get_class_count, il2cpp_method_get_name, il2cpp_method_get_param, il2cpp_method_get_param_count, il2cpp_method_get_return_type, il2cpp_string_new_utf16, il2cpp_type_get_name
 };
 use crate::errors::Il2CppError;
 use crate::utils::cstr_to_str;
@@ -347,10 +347,34 @@ impl Il2CppString {
     #[il2cpp_method(name = "CreateString", args = ["char*"], extension = true)]
     fn create_string(buffer: *const u16) -> Il2CppString {}
 
+    // pub fn new<S: AsRef<str>>(input: S) -> Result<Il2CppString, Il2CppError> {
+    //     let ffi_str = widestring::U16CString::from_str(input.as_ref())
+    //         .map_err(|e| Il2CppError::StringConversionError(e.to_string()))?;
+
+    //         let str_length = *(self.0.wrapping_add(16) as *const u32);
+    //         let str_ptr = self.0.wrapping_add(20) as *const u16;
+    //         let slice = std::slice::from_raw_parts(str_ptr, str_length as usize);
+    //         match String::from_utf16(slice) {
+    //             Ok(string) => write!(f, "{}", string),
+    //             Err(e) => write!(f, "{}", e),
+    //         }
+
+    //     unsafe { Il2CppString::create_string(ffi_str.as_ptr()) }
+    // }
+
     pub fn new<S: AsRef<str>>(input: S) -> Result<Il2CppString, Il2CppError> {
+        unsafe {     
         let ffi_str = widestring::U16CString::from_str(input.as_ref())
             .map_err(|e| Il2CppError::StringConversionError(e.to_string()))?;
-        unsafe { Il2CppString::create_string(ffi_str.as_ptr()) }
+
+            Ok(il2cpp_string_new_utf16(ffi_str.as_ptr(), ffi_str.len() as i32))
+        }
+        // unsafe {
+        //     let str_length = *(self.0.wrapping_add(16) as *const u32);
+        //     let str_ptr = self.0.wrapping_add(20) as *const u16;
+        //     let slice = std::slice::from_raw_parts(str_ptr, str_length as usize);
+        //     String::from_utf16(slice).map_err(|e| Il2CppError::StringConversionError(e.to_string()))
+        // }
     }
 }
 
